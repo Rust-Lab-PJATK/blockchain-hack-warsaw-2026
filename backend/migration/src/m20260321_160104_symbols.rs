@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
                 .table(Symbol::Table)
                 .if_not_exists()
                 .col(pk_auto(Symbol::Id).big_integer())
-                .col(ColumnDef::new(Symbol::Name).string())
+                .col(ColumnDef::new(Symbol::Name).string().not_null())
                 .to_owned(),
         ).await?;
         Ok(())
