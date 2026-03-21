@@ -65,10 +65,8 @@ function DashboardContent() {
     chg,
     positions,
     totalPnl,
-    strategies,
     fund,
     messages,
-    activeStrategiesCount,
     input,
     setInput,
     send,
@@ -258,7 +256,6 @@ function DashboardContent() {
           <div className="td-chat-shell td-chat-shell-desktop">
             <ChatPanel
               messages={messages}
-              activeStrategiesCount={activeStrategiesCount}
               input={input}
               setInput={setInput}
               send={send}
@@ -269,10 +266,7 @@ function DashboardContent() {
               connectionMode={connectionMode}
               showInput={false}
             />
-            <div className="td-chat-footer">
-              {/* centralized input for desktop chat */}
               <GlobalChatInput />
-            </div>
           </div>
 
           <TradingPanel
@@ -284,7 +278,6 @@ function DashboardContent() {
           />
           <PortfolioPanel
             totalPnl={totalPnl}
-            strategies={strategies}
             fund={fund}
             connectionMode={connectionMode}
             lastError={lastError}
@@ -311,7 +304,6 @@ function DashboardContent() {
 
             <ChatPanel
               messages={messages}
-              activeStrategiesCount={activeStrategiesCount}
               input={input}
               setInput={setInput}
               send={send}

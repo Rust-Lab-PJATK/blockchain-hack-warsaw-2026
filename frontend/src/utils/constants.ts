@@ -1,4 +1,4 @@
-export const NAV_ITEMS = ["Trade", "Strategies", "Portfolio"];
+export const NAV_ITEMS = ["Trade", "Portfolio"];
 
 export const TIMEFRAME_TABS = ["15m", "1h", "4h", "1d"];
 

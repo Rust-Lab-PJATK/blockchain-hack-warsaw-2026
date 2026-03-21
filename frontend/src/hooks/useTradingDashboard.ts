@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createTradingGateway } from "@/services/tradingGateway";
-import { Message, Position, Strategy } from "@/utils/types";
+import { Message, Position } from "@/utils/types";
 
 export function useTradingDashboard() {
   const gatewayRef = useRef(createTradingGateway());
@@ -17,7 +17,6 @@ export function useTradingDashboard() {
   const [chg, setChg] = useState(1.96);
   const [fund, setFund] = useState(0.031);
   const [positions, setPositions] = useState<Position[]>([]);
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
@@ -53,7 +52,6 @@ export function useTradingDashboard() {
         setChg(data.chg);
         setFund(data.fund);
         setPositions(data.positions);
-        setStrategies(data.strategies);
         setMessages([data.welcomeMessage]);
         setLastError(null);
       } catch {
@@ -130,13 +128,23 @@ export function useTradingDashboard() {
     setIsSending(true);
 
     try {
+      const start = Date.now();
       const response = await gatewayRef.current.sendPrompt(prompt);
+
+      // For mock gateway keep typing indicator for ~5s total to simulate thinking
+      if (gatewayRef.current.mode === "mock") {
+        const elapsed = Date.now() - start;
+        const remaining = 5000 - elapsed;
+        if (remaining > 0) {
+          await new Promise((r) => window.setTimeout(r, remaining));
+        }
+      }
+
       setMessages((prev) => [
         ...prev,
         {
           role: "agent",
           text: response.text,
-          parsed: response.parsed,
         },
       ]);
       setLastError(null);
@@ -145,7 +153,7 @@ export function useTradingDashboard() {
         ...prev,
         {
           role: "agent",
-          text: "I could not reach the strategy parser service. Please retry.",
+          text: "I could not reach the agent service. Please retry.",
         },
       ]);
       setLastError("Message service unavailable.");
@@ -159,11 +167,6 @@ export function useTradingDashboard() {
     [positions],
   );
 
-  const activeStrategiesCount = useMemo(
-    () => strategies.filter((strategy) => strategy.status !== "waiting").length,
-    [strategies],
-  );
-
   return {
     activeNav,
     setActiveNav,
@@ -173,9 +176,7 @@ export function useTradingDashboard() {
     chg,
     fund,
     positions,
-    strategies,
     totalPnl,
-    activeStrategiesCount,
     input,
     setInput,
     messages,

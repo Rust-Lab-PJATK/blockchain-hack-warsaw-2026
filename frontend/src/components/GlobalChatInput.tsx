@@ -26,7 +26,7 @@ export function GlobalChatInput({ autoFocus }: { autoFocus?: boolean }) {
             }
           }}
           placeholder={
-            isBootstrapping ? "Loading dashboard..." : isSending ? "Sending..." : "Describe your strategy..."
+            isBootstrapping ? "Loading dashboard..." : isSending ? "Sending..." : "Ask the agent..."
           }
           disabled={isBootstrapping || isSending}
           className="td-chat-input"

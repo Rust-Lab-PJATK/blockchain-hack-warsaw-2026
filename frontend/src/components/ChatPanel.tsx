@@ -1,10 +1,8 @@
 import { RefObject } from "react";
 import { Message } from "@/utils/types";
-import { ParsedCard } from "@/components/ui/ParsedCard";
 
 type ChatPanelProps = {
   messages: Message[];
-  activeStrategiesCount: number;
   input: string;
   setInput: (value: string) => void;
   send: () => void;
@@ -19,7 +17,6 @@ type ChatPanelProps = {
 
 export function ChatPanel({
   messages,
-  activeStrategiesCount,
   input,
   setInput,
   send,
@@ -46,7 +43,7 @@ export function ChatPanel({
             }`}
           >
             <div className="td-status-dot" />
-            {activeStrategiesCount} active · {statusLabel}
+            {statusLabel}
           </div>
           {onClose ? (
             <button
@@ -77,10 +74,20 @@ export function ChatPanel({
               }`}
             >
               {m.text}
-              {m.parsed ? <ParsedCard data={m.parsed} /> : null}
             </div>
           </div>
         ))}
+
+        {isSending ? (
+          <div className="td-chat-message" aria-live="polite" aria-label="Agent is typing">
+            <div className="td-chat-role td-chat-role-agent">Agent</div>
+            <div className="td-chat-bubble td-chat-bubble-agent td-chat-bubble-typing">
+              <span className="td-typing-dot" />
+              <span className="td-typing-dot" />
+              <span className="td-typing-dot" />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {showInput ? (
@@ -99,7 +106,7 @@ export function ChatPanel({
                   ? "Loading dashboard..."
                   : isSending
                     ? "Sending..."
-                    : "Describe your strategy..."
+                    : "Ask the agent..."
               }
               disabled={isBootstrapping || isSending}
               className="td-chat-input"

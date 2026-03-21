@@ -1,13 +1,12 @@
 import {
   INITIAL_POSITIONS,
-  INITIAL_STRATEGIES,
   MOCK_RESPONSES,
 } from "@/services/tradingData";
 import {
   getNextMarketTick,
   updatePositionMarks,
 } from "@/services/tradingService";
-import { Message, ParsedStrategy, Position, Strategy } from "@/utils/types";
+import { Message, Position } from "@/utils/types";
 
 type GatewayMode = "mock" | "http";
 
@@ -16,7 +15,6 @@ export type InitialDashboardState = {
   chg: number;
   fund: number;
   positions: Position[];
-  strategies: Strategy[];
   welcomeMessage: Message;
 };
 
@@ -29,7 +27,6 @@ export type MarketTick = {
 
 export type AgentReply = {
   text: string;
-  parsed?: ParsedStrategy;
 };
 
 export type TradingGateway = {
@@ -57,10 +54,9 @@ function createMockTradingGateway(): TradingGateway {
         chg: 1.96,
         fund: 0.031,
         positions: INITIAL_POSITIONS,
-        strategies: INITIAL_STRATEGIES,
         welcomeMessage: {
           role: "agent",
-          text: "Describe your trading strategy and I will parse and monitor it in real time.",
+          text: "Ask about markets, positions, and risk. I can help in real time.",
         },
       };
     },
