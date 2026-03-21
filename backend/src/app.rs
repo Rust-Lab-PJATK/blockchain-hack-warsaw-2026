@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use axum::{Extension, Router as AxumRouter};
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
     bgworker::Queue,
@@ -10,18 +11,18 @@ use loco_rs::{
     Result,
 };
 use migration::Migrator;
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager, StreamableHttpService,
+};
 use std::path::Path;
+use std::sync::Arc;
 
 #[allow(unused_imports)]
-use crate::{controllers, tasks};
+use crate::{controllers, services, tasks};
 
 pub struct App;
 #[async_trait]
 impl Hooks for App {
-    fn app_name() -> &'static str {
-        env!("CARGO_CRATE_NAME")
-    }
-
     fn app_version() -> String {
         format!(
             "{} ({})",
@@ -32,6 +33,10 @@ impl Hooks for App {
         )
     }
 
+    fn app_name() -> &'static str {
+        env!("CARGO_CRATE_NAME")
+    }
+
     async fn boot(
         mode: StartMode,
         environment: &Environment,
@@ -40,13 +45,31 @@ impl Hooks for App {
         create_app::<Self, Migrator>(mode, environment, config).await
     }
 
+    async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+          let provider: Arc<dyn services::llm::LlmProvider> =
+              Arc::new(services::llm::MockProvider);
+
+          let db = ctx.db.clone();
+          let mcp_service = StreamableHttpService::new(
+              move || Ok(services::mcp::TradingMcpServer::new(db.clone())),
+              LocalSessionManager::default().into(),
+              Default::default(),
+          );
+
+          Ok(router
+              .layer(Extension(provider))
+              .nest_service("/mcp", mcp_service))
+    }
+
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(vec![])
     }
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::strategies::routes())
             .add_route(controllers::home::routes())
+            .add_route(controllers::chat::routes())
     }
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
         Ok(())
