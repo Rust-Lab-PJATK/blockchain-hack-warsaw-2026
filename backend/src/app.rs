@@ -11,6 +11,9 @@ use loco_rs::{
     Result,
 };
 use migration::Migrator;
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager, StreamableHttpService,
+};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -42,10 +45,20 @@ impl Hooks for App {
         create_app::<Self, Migrator>(mode, environment, config).await
     }
 
-    async fn after_routes(router: AxumRouter, _ctx: &AppContext) -> Result<AxumRouter> {
-        let provider: Arc<dyn services::llm::LlmProvider> =
-            Arc::new(services::llm::MockProvider);
-        Ok(router.layer(Extension(provider)))
+    async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+          let provider: Arc<dyn services::llm::LlmProvider> =
+              Arc::new(services::llm::MockProvider);
+
+          let db = ctx.db.clone();
+          let mcp_service = StreamableHttpService::new(
+              move || Ok(services::mcp::TradingMcpServer::new(db.clone())),
+              LocalSessionManager::default().into(),
+              Default::default(),
+          );
+
+          Ok(router
+              .layer(Extension(provider))
+              .nest_service("/mcp", mcp_service))
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
