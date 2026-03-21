@@ -1,7 +1,4 @@
-import {
-  INITIAL_POSITIONS,
-  MOCK_RESPONSES,
-} from "@/services/tradingData";
+import { INITIAL_POSITIONS, MOCK_RESPONSES } from "@/services/tradingData";
 import {
   getNextMarketTick,
   updatePositionMarks,
@@ -27,17 +24,60 @@ export type MarketTick = {
 
 export type AgentReply = {
   text: string;
+  // Optional backend payload describing an action that must be user-confirmed.
+  proposedAction?: {
+    label: string;
+    summary: string;
+  };
+};
+
+export type GatewayRequestOptions = {
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+};
+
+export type TradingApiEndpoints = {
+  dashboard: string;
+  marketTick: string;
+  agentParse: string;
+};
+
+export const TRADING_API_ENDPOINTS: TradingApiEndpoints = {
+  dashboard: "/dashboard",
+  marketTick: "/market/tick",
+  agentParse: "/agent/parse",
+};
+
+export type MarketTickRequest = {
+  previousPrice: number;
+  previousFunding: number;
+  positions: Position[];
+};
+
+export type AgentPromptRequest = {
+  prompt: string;
+};
+
+export type BackendErrorResponse = {
+  message?: string;
+  code?: string;
 };
 
 export type TradingGateway = {
   mode: GatewayMode;
-  getInitialDashboardState: () => Promise<InitialDashboardState>;
+  getInitialDashboardState: (
+    options?: GatewayRequestOptions,
+  ) => Promise<InitialDashboardState>;
   getMarketTick: (
     previousPrice: number,
     previousFunding: number,
     positions: Position[],
+    options?: GatewayRequestOptions,
   ) => Promise<MarketTick>;
-  sendPrompt: (prompt: string) => Promise<AgentReply>;
+  sendPrompt: (
+    prompt: string,
+    options?: GatewayRequestOptions,
+  ) => Promise<AgentReply>;
 };
 
 function getRandomMockResponse() {
@@ -94,10 +134,30 @@ async function fetchJson<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`Gateway request failed: ${response.status}`);
+    let backendErrorMessage: string | undefined;
+
+    try {
+      const maybeError = (await response.json()) as BackendErrorResponse;
+      backendErrorMessage = maybeError.message;
+    } catch {
+      // Ignore JSON parsing failures and fallback to status-based message.
+    }
+
+    throw new Error(
+      backendErrorMessage ?? `Gateway request failed: ${response.status}`,
+    );
   }
 
   return (await response.json()) as T;
+}
+
+function buildGatewayHeaders(extraHeaders?: HeadersInit): HeadersInit {
+  // Backend integration point:
+  // Add auth/session headers here when backend enables protected endpoints.
+  // Example: Authorization: Bearer <token>, X-Trace-Id: <uuid>
+  return {
+    ...(extraHeaders ?? {}),
+  };
 }
 
 function createHttpTradingGateway(baseUrl: string): TradingGateway {
@@ -105,23 +165,40 @@ function createHttpTradingGateway(baseUrl: string): TradingGateway {
 
   return {
     mode: "http",
-    getInitialDashboardState() {
-      return fetchJson<InitialDashboardState>(`${normalizedBaseUrl}/dashboard`);
+    getInitialDashboardState(options) {
+      return fetchJson<InitialDashboardState>(
+        `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.dashboard}`,
+        {
+          signal: options?.signal,
+          headers: buildGatewayHeaders(options?.headers),
+        },
+      );
     },
-    getMarketTick(previousPrice, previousFunding, positions) {
-      return fetchJson<MarketTick>(`${normalizedBaseUrl}/market/tick`, {
+    getMarketTick(previousPrice, previousFunding, positions, options) {
+      const requestBody: MarketTickRequest = {
+        previousPrice,
+        previousFunding,
+        positions,
+      };
+
+      return fetchJson<MarketTick>(`${normalizedBaseUrl}${TRADING_API_ENDPOINTS.marketTick}`, {
         method: "POST",
-        body: JSON.stringify({
-          previousPrice,
-          previousFunding,
-          positions,
-        }),
+        signal: options?.signal,
+        headers: buildGatewayHeaders(options?.headers),
+        body: JSON.stringify(requestBody),
       });
     },
-    sendPrompt(prompt) {
-      return fetchJson<AgentReply>(`${normalizedBaseUrl}/agent/parse`, {
+    sendPrompt(prompt, options) {
+      const requestBody: AgentPromptRequest = { prompt };
+
+      // Backend integration point:
+      // If agent endpoint starts streaming (SSE/WebSocket), replace this call
+      // with a streaming client and push partial tokens into chat state.
+      return fetchJson<AgentReply>(`${normalizedBaseUrl}${TRADING_API_ENDPOINTS.agentParse}`, {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        signal: options?.signal,
+        headers: buildGatewayHeaders(options?.headers),
+        body: JSON.stringify(requestBody),
       });
     },
   };

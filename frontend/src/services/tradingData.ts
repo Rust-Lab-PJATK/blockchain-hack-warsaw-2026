@@ -41,4 +41,3 @@ export const INITIAL_POSITIONS: Position[] = [
     status: "watching",
   },
 ];
-

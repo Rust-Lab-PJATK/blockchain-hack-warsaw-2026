@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useSyncExternalStore,
+} from "react";
 import GlobalChatInput from "@/components/GlobalChatInput";
 import { ChatPanel } from "@/components/ChatPanel";
 import { PortfolioPanel } from "@/components/PortfolioPanel";
@@ -51,7 +57,10 @@ function DashboardContent() {
 
   const clampChatHeight = useCallback(
     (height: number) => {
-      return Math.min(Math.max(height, minMobileChatHeight), getMaxMobileChatHeight());
+      return Math.min(
+        Math.max(height, minMobileChatHeight),
+        getMaxMobileChatHeight(),
+      );
     },
     [getMaxMobileChatHeight],
   );
@@ -70,15 +79,22 @@ function DashboardContent() {
     input,
     setInput,
     send,
+    confirmAction,
+    cancelAction,
     msgsRef,
     isBootstrapping,
     isSending,
+    hasPendingConfirmation,
+    pendingActionSummary,
     lastError,
     connectionMode,
   } = useTradingDashboardContext();
 
   useEffect(() => {
-    document.body.classList.toggle("td-mobile-chat-lock", !isDesktop && isMobileChatOpen);
+    document.body.classList.toggle(
+      "td-mobile-chat-lock",
+      !isDesktop && isMobileChatOpen,
+    );
 
     return () => {
       document.body.classList.remove("td-mobile-chat-lock");
@@ -122,7 +138,8 @@ function DashboardContent() {
       const target = e.target as Node | null;
 
       if (target instanceof Element && target.closest(".td-chat-handle")) {
-        const currentHeight = mobileChatHeight ?? Math.round(window.innerHeight * 0.33);
+        const currentHeight =
+          mobileChatHeight ?? Math.round(window.innerHeight * 0.33);
         startHeightRef.current = clampChatHeight(currentHeight);
         touchStartYRef.current = e.touches[0].clientY;
         touchCurrentYRef.current = e.touches[0].clientY;
@@ -132,7 +149,12 @@ function DashboardContent() {
 
       // If the touch starts inside the messages list and the list is scrolled,
       // do not treat it as a close gesture — allow normal scrolling.
-      if (listNode && target && listNode.contains(target) && listNode.scrollTop > 0) {
+      if (
+        listNode &&
+        target &&
+        listNode.contains(target) &&
+        listNode.scrollTop > 0
+      ) {
         touchStartYRef.current = null;
         touchCurrentYRef.current = null;
         touchFromListRef.current = false;
@@ -142,7 +164,12 @@ function DashboardContent() {
       touchStartYRef.current = e.touches[0].clientY;
       touchCurrentYRef.current = e.touches[0].clientY;
       // mark origin when starting from the list (and at top) so we can allow pull-to-close
-      if (listNode && target && listNode.contains(target) && listNode.scrollTop === 0) {
+      if (
+        listNode &&
+        target &&
+        listNode.contains(target) &&
+        listNode.scrollTop === 0
+      ) {
         touchFromListRef.current = true;
       } else {
         touchFromListRef.current = false;
@@ -162,7 +189,10 @@ function DashboardContent() {
         e.preventDefault();
         return;
       }
-      const delta = Math.max(0, touchCurrentYRef.current - touchStartYRef.current);
+      const delta = Math.max(
+        0,
+        touchCurrentYRef.current - touchStartYRef.current,
+      );
       const el = mobileChatRef.current;
       if (el && !startHeightRef.current && touchFromListRef.current) {
         // pull-down-to-close when started from list at scrollTop === 0
@@ -186,7 +216,8 @@ function DashboardContent() {
       touchFromListRef.current = false;
       return;
     }
-    if (touchStartYRef.current == null || touchCurrentYRef.current == null) return;
+    if (touchStartYRef.current == null || touchCurrentYRef.current == null)
+      return;
     const delta = touchCurrentYRef.current - touchStartYRef.current;
     const threshold = 80; // px to trigger close
     if (delta > threshold && touchFromListRef.current) {
@@ -259,14 +290,18 @@ function DashboardContent() {
               input={input}
               setInput={setInput}
               send={send}
+              confirmAction={confirmAction}
+              cancelAction={cancelAction}
               msgsRef={msgsRef}
               isBootstrapping={isBootstrapping}
               isSending={isSending}
+              hasPendingConfirmation={hasPendingConfirmation}
+              pendingActionSummary={pendingActionSummary}
               lastError={lastError}
               connectionMode={connectionMode}
               showInput={false}
             />
-              <GlobalChatInput />
+            <GlobalChatInput />
           </div>
 
           <TradingPanel
@@ -298,7 +333,9 @@ function DashboardContent() {
           <div
             ref={mobileChatRef}
             className="td-mobile-chat-sheet"
-            style={mobileChatHeight ? { height: `${mobileChatHeight}px` } : undefined}
+            style={
+              mobileChatHeight ? { height: `${mobileChatHeight}px` } : undefined
+            }
           >
             <div className="td-chat-handle" aria-label="Resize chat panel" />
 
@@ -307,9 +344,13 @@ function DashboardContent() {
               input={input}
               setInput={setInput}
               send={send}
+              confirmAction={confirmAction}
+              cancelAction={cancelAction}
               msgsRef={msgsRef}
               isBootstrapping={isBootstrapping}
               isSending={isSending}
+              hasPendingConfirmation={hasPendingConfirmation}
+              pendingActionSummary={pendingActionSummary}
               lastError={lastError}
               connectionMode={connectionMode}
               onClose={() => setIsMobileChatOpen(false)}
@@ -323,8 +364,6 @@ function DashboardContent() {
           </div>
         </>
       ) : null}
-
-      
 
       {!isDesktop ? (
         <button

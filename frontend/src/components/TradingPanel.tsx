@@ -26,9 +26,7 @@ export function TradingPanel({
       <div className="td-trading-header">
         <div className="td-price-row">
           <span className="td-market-label">SOL-PERP</span>
-          <span className="td-price-value">
-            ${solPrice.toFixed(2)}
-          </span>
+          <span className="td-price-value">${solPrice.toFixed(2)}</span>
           <span
             className="td-price-change"
             style={{
@@ -74,15 +72,11 @@ export function TradingPanel({
           <tbody>
             {positions.map((p, i) => (
               <tr key={`${p.market}-${i}`} className="td-table-row">
-                <td className="td-table-cell td-table-mono">
-                  {p.market}
-                </td>
+                <td className="td-table-cell td-table-mono">{p.market}</td>
                 <td className="td-table-cell">
                   <SideBadge side={p.side} />
                 </td>
-                <td className="td-table-cell td-table-text">
-                  {p.size}
-                </td>
+                <td className="td-table-cell td-table-text">{p.size}</td>
                 <td className="td-table-cell td-table-text td-table-mono">
                   ${p.entry.toFixed(2)}
                 </td>

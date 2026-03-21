@@ -52,9 +52,7 @@ export function PortfolioPanel({
   return (
     <div className="td-portfolio">
       <div className="td-portfolio-header">
-        <div className="td-section-title">
-          Portfolio
-        </div>
+        <div className="td-section-title">Portfolio</div>
       </div>
 
       <div className="td-portfolio-body">
@@ -68,7 +66,10 @@ export function PortfolioPanel({
 
         <div className="td-stats-grid">
           {stats.map((s) => (
-            <div key={s.label} className={`td-stat-card td-stat-card-${s.tone}`}>
+            <div
+              key={s.label}
+              className={`td-stat-card td-stat-card-${s.tone}`}
+            >
               <div className="td-stat-label">{s.label}</div>
               <div className="td-stat-value">{s.value}</div>
             </div>
