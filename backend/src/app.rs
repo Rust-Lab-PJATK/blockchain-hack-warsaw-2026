@@ -46,8 +46,19 @@ impl Hooks for App {
     }
 
     async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+          let mcp_server = Arc::new(services::mcp::TradingMcpServer::new(ctx.db.clone()));
+
           let provider: Arc<dyn services::llm::LlmProvider> =
-              Arc::new(services::llm::MockProvider);
+              match services::llm::VercelProvider::new(mcp_server.clone()) {
+                  Ok(p) => {
+                      tracing::info!("Using Vercel AI Gateway provider");
+                      Arc::new(p)
+                  }
+                  Err(e) => {
+                      tracing::warn!("Vercel provider not configured ({e}), using MockProvider");
+                      Arc::new(services::llm::MockProvider)
+                  }
+              };
 
           let db = ctx.db.clone();
           let mcp_service = StreamableHttpService::new(

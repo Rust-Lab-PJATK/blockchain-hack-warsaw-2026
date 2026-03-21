@@ -131,6 +131,25 @@ impl TradingMcpServer {
     }
 }
 
+impl TradingMcpServer {
+    pub async fn call_list_symbols(&self) -> Result<CallToolResult, McpError> {
+        self.list_symbols().await
+    }
+
+    pub async fn call_list_condition_variables(
+        &self,
+    ) -> Result<CallToolResult, McpError> {
+        self.list_condition_variables().await
+    }
+
+    pub async fn call_create_trade(
+        &self,
+        args: Parameters<CreateTradeArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        self.create_trade(args).await
+    }
+}
+
 // TODO tutaj trzeba wypełnić sekcję: Example conditions, te niżej przykładowe
 #[tool_handler]
 impl ServerHandler for TradingMcpServer {
