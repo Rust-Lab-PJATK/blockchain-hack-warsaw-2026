@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use axum::Router as AxumRouter;
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
     bgworker::Queue,
@@ -10,10 +11,13 @@ use loco_rs::{
     Result,
 };
 use migration::Migrator;
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager, StreamableHttpService,
+};
 use std::path::Path;
 
 #[allow(unused_imports)]
-use crate::{controllers, tasks};
+use crate::{controllers, services, tasks};
 
 pub struct App;
 #[async_trait]
@@ -38,6 +42,16 @@ impl Hooks for App {
         config: Config,
     ) -> Result<BootResult> {
         create_app::<Self, Migrator>(mode, environment, config).await
+    }
+
+    async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+        let db = ctx.db.clone();
+        let mcp_service = StreamableHttpService::new(
+            move || Ok(services::mcp::TradingMcpServer::new(db.clone())),
+            LocalSessionManager::default().into(),
+            Default::default(),
+        );
+        Ok(router.nest_service("/mcp", mcp_service))
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
