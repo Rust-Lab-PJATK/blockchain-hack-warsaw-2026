@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod chat_message;
 pub mod sea_orm_active_enums;
 pub mod strategy;
 pub mod symbol;
