@@ -94,7 +94,7 @@ impl TradingMcpServer {
 
         let names: Vec<&str> = symbols
             .iter()
-            .filter_map(|s| s.name.as_deref())
+            .map(|s| s.name.as_str())
             .collect();
 
         Ok(CallToolResult::success(vec![Content::text(
