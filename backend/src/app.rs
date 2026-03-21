@@ -18,10 +18,6 @@ use crate::{controllers, tasks};
 pub struct App;
 #[async_trait]
 impl Hooks for App {
-    fn app_name() -> &'static str {
-        env!("CARGO_CRATE_NAME")
-    }
-
     fn app_version() -> String {
         format!(
             "{} ({})",
@@ -30,6 +26,10 @@ impl Hooks for App {
                 .or(option_env!("GITHUB_SHA"))
                 .unwrap_or("dev")
         )
+    }
+
+    fn app_name() -> &'static str {
+        env!("CARGO_CRATE_NAME")
     }
 
     async fn boot(
@@ -46,6 +46,7 @@ impl Hooks for App {
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::strategies::routes())
             .add_route(controllers::home::routes())
     }
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
