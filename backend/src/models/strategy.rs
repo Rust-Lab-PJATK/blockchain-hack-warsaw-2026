@@ -2,7 +2,7 @@
   use crate::models::_entities::strategy::{ActiveModel, Model};
   use crate::models::_entities::symbol;
   use loco_rs::prelude::*;
-  use crate::models::_entities::sea_orm_active_enums::{OrderType, Side};
+  use crate::models::_entities::sea_orm_active_enums::{OrderType, Side, Status};
 
   impl Model {
       pub async fn create(
@@ -13,6 +13,7 @@
           leverage: i32,
           price: Decimal,
           quantity: Decimal,
+          status: Status
       ) -> ModelResult<Self> {
           let symbol_exists = symbol::Entity::find()
               .filter(symbol::Column::Name.eq(symbol))
@@ -31,6 +32,7 @@
               leverage: Set(leverage),
               price: Set(price),
               quantity: Set(quantity),
+              status: Set(status),
               ..Default::default()
           };
 

@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 use rust_decimal::Decimal;
 use crate::models::_entities::strategy;
-use crate::models::_entities::sea_orm_active_enums::{Side, OrderType};
+use crate::models::_entities::sea_orm_active_enums::{Side, OrderType, Status};
 
 #[derive(Deserialize)]
 pub struct CreateStrategyParams {
@@ -12,6 +12,7 @@ pub struct CreateStrategyParams {
     pub leverage: i32,
     pub price: Decimal,
     pub quantity: Decimal,
+    pub status: Status
 }
 
 async fn create(
@@ -26,6 +27,7 @@ async fn create(
         params.leverage,
         params.price,
         params.quantity,
+        params.status
     ).await {
         Ok(strategy) => format::json(strategy),
         Err(ModelError::Message(msg)) => Err(Error::BadRequest(msg)),

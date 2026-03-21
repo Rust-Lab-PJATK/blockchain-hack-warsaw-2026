@@ -1,18 +1,15 @@
-use serde::Deserialize;
 
-use super::_entities::sea_orm_active_enums::{OrderType, Side};
+use super::_entities::sea_orm_active_enums::{OrderType, Side, Status};
+impl schemars::JsonSchema for Status {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Status".into()
+    }
 
-impl<'de> Deserialize<'de> for Side {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "buy" => Ok(Side::Buy),
-            "sell" => Ok(Side::Sell),
-            other => Err(serde::de::Error::unknown_variant(other, &["buy", "sell"])),
-        }
+    fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "enum": ["waiting", "in progress", "cancelled", "completed"]
+        })
     }
 }
 
@@ -26,24 +23,6 @@ impl schemars::JsonSchema for Side {
             "type": "string",
             "enum": ["buy", "sell"]
         })
-    }
-}
-
-impl<'de> Deserialize<'de> for OrderType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "limit" => Ok(OrderType::Limit),
-            "market" => Ok(OrderType::Market),
-            "stop_limit" => Ok(OrderType::StopLimit),
-            other => Err(serde::de::Error::unknown_variant(
-                other,
-                &["limit", "market", "stop_limit"],
-            )),
-        }
     }
 }
 

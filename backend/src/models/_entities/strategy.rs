@@ -2,10 +2,11 @@
 
 use super::sea_orm_active_enums::OrderType;
 use super::sea_orm_active_enums::Side;
+use super::sea_orm_active_enums::Status;
 use sea_orm::entity::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "strategy")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -16,6 +17,7 @@ pub struct Model {
     pub leverage: i32,
     pub price: Decimal,
     pub quantity: Decimal,
+    pub status: Status,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

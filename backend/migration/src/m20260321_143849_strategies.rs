@@ -23,6 +23,13 @@ impl MigrationTrait for Migration {
         )
             .await?;
 
+        m.create_type(
+            Type::create()
+                .as_enum(Status::Type)
+                .values([Status::Waiting, Status::InProgress, Status::Cancelled, Status::Completed])
+                .to_owned(),
+        ).await?;
+
         m.create_table(
             Table::create()
                 .table(Strategy::Table)
@@ -34,6 +41,7 @@ impl MigrationTrait for Migration {
                 .col(ColumnDef::new(Strategy::Leverage).integer().not_null())
                 .col(ColumnDef::new(Strategy::Price).decimal().not_null())
                 .col(ColumnDef::new(Strategy::Quantity).decimal().not_null())
+                .col(ColumnDef::new(Strategy::Status).custom(Status::Type).not_null())
                 .to_owned(),
         )
             .await
@@ -43,6 +51,7 @@ impl MigrationTrait for Migration {
         m.drop_table(Table::drop().table(Strategy::Table).to_owned()).await?;
         m.drop_type(Type::drop().name(Side::Type).to_owned()).await?;
         m.drop_type(Type::drop().name(OrderType::Type).to_owned()).await?;
+        m.drop_type(Type::drop().name(Status::Type).to_owned()).await?;
         Ok(())
     }
 }
@@ -57,6 +66,7 @@ enum Strategy {
     Leverage,
     Price,
     Quantity,
+    Status
 }
 
 #[derive(DeriveIden)]
@@ -74,4 +84,14 @@ enum OrderType {
     Limit,
     Market,
     StopLimit,
+}
+
+#[derive(DeriveIden)]
+enum Status {
+    #[sea_orm(iden = "status")]
+    Type,
+    Waiting,
+    InProgress,
+    Cancelled,
+    Completed
 }
