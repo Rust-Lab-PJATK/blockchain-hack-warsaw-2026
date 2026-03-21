@@ -73,6 +73,7 @@ impl DriftService {
             .normalize_open_amount(market_index, base_asset_amount)
             .await?;
 
+        self.initialize_user_pda().await.ok();
         let sub_account = self.client.wallet().sub_account(SUB_ACCOUNT_ID);
         let user = self
             .client
@@ -105,6 +106,7 @@ impl DriftService {
     }
 
     pub async fn close_perp_position(&self, market_index: u16) -> Result<SignatureText> {
+        self.initialize_user_pda().await.ok();
         let sub_account = self.client.wallet().sub_account(SUB_ACCOUNT_ID);
         let user = self
             .client
