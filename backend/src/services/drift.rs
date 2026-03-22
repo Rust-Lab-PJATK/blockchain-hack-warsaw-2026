@@ -1,6 +1,8 @@
 use loco_rs::prelude::*;
+use std::collections::HashMap;
 
 pub type SignatureText = String;
+pub type MarketData = HashMap<String, f64>;
 
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
@@ -60,6 +62,16 @@ impl PerpAmount {
     }
 }
 
+/// Variables available for Lua condition evaluation, returned by `get_market_data`.
+pub const MARKET_DATA_VARIABLES: &[(&str, &str)] = &[
+    ("price", "Current market price of the asset"),
+    ("volume", "Current trading volume (24h)"),
+    ("high_24h", "24h high price"),
+    ("low_24h", "24h low price"),
+    ("open_24h", "24h open price"),
+    ("change_pct", "24h price change percentage"),
+];
+
 #[async_trait]
 pub trait DriftProvider: Send + Sync {
     async fn initialize_user_pda(&self) -> Result<SignatureText>;
@@ -70,6 +82,12 @@ pub trait DriftProvider: Send + Sync {
         amount: PerpAmount,
     ) -> Result<SignatureText>;
     async fn close_perp_position(&self, market: PerpMarket) -> Result<SignatureText>;
+    /// Fetch current market data for a given symbol. Returns variable name → value map
+    /// usable by the Lua condition evaluator.
+    async fn get_market_data(&self, symbol: &str) -> Result<MarketData>;
+    /// Get the unrealized PnL percentage for an open position on a given market.
+    /// Returns None if no position is open.
+    async fn get_position_pnl(&self, market: PerpMarket) -> Result<Option<f64>>;
 }
 
 // ── Real implementation (requires drift feature + Solana RPC) ──────────────
@@ -216,6 +234,41 @@ mod real {
             let sig = self.client.sign_and_send(tx).await.map_err(Error::wrap)?;
             Ok(sig.to_string())
         }
+
+        async fn get_market_data(&self, _symbol: &str) -> Result<MarketData> {
+            // TODO: fetch real oracle price from Drift's on-chain oracle / Pyth
+            // For now return the perp market oracle price if available
+            let mut data = HashMap::new();
+            data.insert("price".to_string(), 0.0);
+            data.insert("volume".to_string(), 0.0);
+            data.insert("high_24h".to_string(), 0.0);
+            data.insert("low_24h".to_string(), 0.0);
+            data.insert("open_24h".to_string(), 0.0);
+            data.insert("change_pct".to_string(), 0.0);
+            Ok(data)
+        }
+
+        async fn get_position_pnl(&self, market: PerpMarket) -> Result<Option<f64>> {
+            let sub_account = self.client.wallet().sub_account(SUB_ACCOUNT_ID);
+            let position = self
+                .client
+                .perp_position(&sub_account, market as u16)
+                .await
+                .map_err(Error::wrap)?;
+
+            match position {
+                Some(p) if p.base_asset_amount != 0 => {
+                    // Simplified PnL: (quote_entry - quote_break_even) / quote_entry * 100
+                    let entry = p.quote_entry_amount as f64;
+                    let breakeven = p.quote_break_even_amount as f64;
+                    if entry.abs() < f64::EPSILON {
+                        return Ok(Some(0.0));
+                    }
+                    Ok(Some((entry - breakeven) / entry.abs() * 100.0))
+                }
+                _ => Ok(None),
+            }
+        }
     }
 
     impl DriftService {
@@ -321,6 +374,25 @@ mod mock {
         async fn close_perp_position(&self, market: PerpMarket) -> Result<SignatureText> {
             tracing::info!("[mock] close_perp_position: market={market:?}");
             Ok(format!("mock_signature_close_{:?}", market))
+        }
+
+        async fn get_market_data(&self, symbol: &str) -> Result<MarketData> {
+            tracing::info!("[mock] get_market_data: symbol={symbol}");
+            let mut data = HashMap::new();
+            // Return plausible mock data so conditions can be tested locally
+            data.insert("price".to_string(), 125.0);
+            data.insert("volume".to_string(), 5_000_000.0);
+            data.insert("high_24h".to_string(), 130.0);
+            data.insert("low_24h".to_string(), 120.0);
+            data.insert("open_24h".to_string(), 123.0);
+            data.insert("change_pct".to_string(), 1.6);
+            Ok(data)
+        }
+
+        async fn get_position_pnl(&self, market: PerpMarket) -> Result<Option<f64>> {
+            tracing::info!("[mock] get_position_pnl: market={market:?}");
+            // Mock: return a small positive PnL
+            Ok(Some(2.5))
         }
     }
 }

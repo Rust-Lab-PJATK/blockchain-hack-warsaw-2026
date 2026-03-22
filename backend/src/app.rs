@@ -67,6 +67,11 @@ impl Hooks for App {
             Default::default(),
         );
 
+        // Start the strategy engine background loop
+        let drift_provider: Arc<dyn services::drift::DriftProvider> =
+            Arc::from(services::drift::create_drift_provider(ctx).await?);
+        services::strategy_engine::start(ctx.db.clone(), drift_provider);
+
         Ok(router
             .layer(Extension(provider))
             .nest_service("/mcp", mcp_service))
