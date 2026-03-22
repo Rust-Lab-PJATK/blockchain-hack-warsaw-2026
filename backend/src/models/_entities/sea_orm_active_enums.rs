@@ -21,3 +21,23 @@ pub enum Side {
     #[sea_orm(string_value = "sell")]
     Sell,
 }
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize)]
+#[sea_orm(
+    rs_type = "String",
+    db_type = "Enum",
+    enum_name = "strategy_status"
+)]
+pub enum StrategyStatus {
+    #[sea_orm(string_value = "waiting")]
+    Waiting,
+    #[sea_orm(string_value = "approved")]
+    Approved,
+    #[sea_orm(string_value = "triggered")]
+    Triggered,
+    #[sea_orm(string_value = "stopped")]
+    Stopped,
+    #[sea_orm(string_value = "failed")]
+    Failed,
+    #[sea_orm(string_value = "queued")]
+    Queued,
+}

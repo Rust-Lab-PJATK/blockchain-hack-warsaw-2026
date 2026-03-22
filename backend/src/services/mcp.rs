@@ -9,10 +9,11 @@ use rmcp::{
 use serde::Deserialize;
 
 use crate::models::_entities::{
-    sea_orm_active_enums::{OrderType, Side},
+    sea_orm_active_enums::{OrderType, Side, StrategyStatus},
     strategy,
     symbol,
 };
+use crate::services::drift::MARKET_DATA_VARIABLES;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 use std::sync::Arc;
 
@@ -37,9 +38,18 @@ pub struct CreateTradeArgs {
     pub price: f64,
 
     #[schemars(
-        description = "Lua expression evaluated against market variables (price, volume, rsi, sma, etc.). Must return boolean. Example: price < 129 and rsi < 30"
+        description = "Lua expression evaluated against market variables (price, volume, etc.). Must return boolean. Example: price < 129. Use list_condition_variables to discover available variables."
     )]
     pub condition: String,
+
+    #[schemars(description = "Optional stop-loss percentage (positive number). If the position PnL drops below -X%, it will be automatically closed. Example: 5.0 means close at -5%")]
+    pub stop_loss_pct: Option<f64>,
+
+    #[schemars(description = "Optional absolute stop-loss price. For long positions: if price drops below this value, close. For short: if price rises above this value, close. Example: 120.0")]
+    pub stop_loss_price: Option<f64>,
+
+    #[schemars(description = "Optional scheduled execution time in ISO 8601 format. The strategy will only execute after this time. Example: 2026-03-22T18:00:00Z")]
+    pub scheduled_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,23 +71,16 @@ impl TradingMcpServer {
     async fn list_condition_variables(
         &self,
     ) -> Result<CallToolResult, McpError> {
-        // TODO tutaj trzeba dać listę pól z jakich może korzystać AI podczas robienia warunku lua, te niżej są poglądowe
-        let vars = serde_json::json!([
-            { "name": "price",      "type": "number", "description": "Current market price of the asset" },
-            { "name": "volume",     "type": "number", "description": "Current trading volume (24h)" },
-            { "name": "rsi",        "type": "number", "description": "Relative Strength Index (0-100)" },
-            { "name": "sma",        "type": "number", "description": "Simple Moving Average" },
-            { "name": "ema",        "type": "number", "description": "Exponential Moving Average" },
-            { "name": "macd",       "type": "number", "description": "MACD line value" },
-            { "name": "macd_signal","type": "number", "description": "MACD signal line value" },
-            { "name": "bb_upper",   "type": "number", "description": "Bollinger Band upper" },
-            { "name": "bb_lower",   "type": "number", "description": "Bollinger Band lower" },
-            { "name": "atr",        "type": "number", "description": "Average True Range" },
-            { "name": "high_24h",   "type": "number", "description": "24h high price" },
-            { "name": "low_24h",    "type": "number", "description": "24h low price" },
-            { "name": "open_24h",   "type": "number", "description": "24h open price" },
-            { "name": "change_pct", "type": "number", "description": "24h price change percentage" },
-        ]);
+        let vars: Vec<serde_json::Value> = MARKET_DATA_VARIABLES
+            .iter()
+            .map(|(name, desc)| {
+                serde_json::json!({
+                    "name": name,
+                    "type": "number",
+                    "description": desc,
+                })
+            })
+            .collect();
 
         Ok(CallToolResult::success(vec![Content::text(
             serde_json::to_string_pretty(&vars)
@@ -103,11 +106,33 @@ impl TradingMcpServer {
         )]))
     }
 
-    #[tool(description = "Create a trade order. The condition field is a Lua expression evaluated against market variables. The trade executes when the condition returns true.")]
+    #[tool(description = "Create a trade order. The condition field is a Lua expression evaluated against market variables. The trade will be created with status 'waiting' and must be approved by the user before the strategy engine will execute it.")]
     async fn create_trade(
         &self,
         Parameters(args): Parameters<CreateTradeArgs>,
     ) -> Result<CallToolResult, McpError> {
+        let stop_loss_pct = args
+            .stop_loss_pct
+            .map(rust_decimal::Decimal::try_from)
+            .transpose()
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let stop_loss_price = args
+            .stop_loss_price
+            .map(rust_decimal::Decimal::try_from)
+            .transpose()
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let scheduled_at = args
+            .scheduled_at
+            .as_deref()
+            .map(|s| {
+                chrono::DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.with_timezone(&chrono::Utc).into())
+                    .map_err(|e| McpError::invalid_params(format!("invalid scheduled_at: {e}"), None))
+            })
+            .transpose()?;
+
         let record = strategy::ActiveModel {
             symbol: Set(args.symbol.clone()),
             side: Set(args.side.clone()),
@@ -117,6 +142,11 @@ impl TradingMcpServer {
             leverage: Set(args.leverage),
             price: Set(rust_decimal::Decimal::try_from(args.price)
                 .map_err(|e| McpError::invalid_params(e.to_string(), None))?),
+            condition: Set(args.condition.clone()),
+            stop_loss_pct: Set(stop_loss_pct),
+            stop_loss_price: Set(stop_loss_price),
+            scheduled_at: Set(scheduled_at),
+            status: Set(StrategyStatus::Waiting),
             ..Default::default()
         };
 
@@ -125,8 +155,8 @@ impl TradingMcpServer {
         })?;
 
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Strategy #{} created: {:?} {} {} @ {} x{} (type: {:?}, condition: \"{}\")",
-            result.id, args.side, args.quantity, args.symbol, args.price, args.leverage, args.order_type, args.condition
+            "Strategy #{} created (status: waiting — user must approve before execution): {:?} {} {} @ {} x{} (type: {:?}, condition: \"{}\", stop_loss_pct: {:?}, stop_loss_price: {:?}, scheduled_at: {:?})",
+            result.id, args.side, args.quantity, args.symbol, args.price, args.leverage, args.order_type, args.condition, args.stop_loss_pct, args.stop_loss_price, args.scheduled_at
         ))]))
     }
 }
