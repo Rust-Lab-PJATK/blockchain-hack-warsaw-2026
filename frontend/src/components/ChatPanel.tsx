@@ -76,7 +76,7 @@ export function ChatPanel({
                 m.role === "user" ? "td-chat-role-user" : "td-chat-role-agent"
               }`}
             >
-              {m.role === "user" ? "You" : "Agent"}
+              {m.role === "user" ? "You" : "DriftMind"}
             </div>
             <div
               className={`td-chat-bubble ${

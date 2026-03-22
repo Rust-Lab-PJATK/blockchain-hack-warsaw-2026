@@ -1,18 +1,13 @@
-import { INITIAL_POSITIONS, MOCK_RESPONSES } from "@/services/tradingData";
-import {
-  getNextMarketTick,
-  updatePositionMarks,
-} from "@/services/tradingService";
 import { Message, Position } from "@/utils/types";
 
-type GatewayMode = "mock" | "http";
+type GatewayMode = "http";
 
 export type InitialDashboardState = {
   solPrice: number;
   chg: number;
   fund: number;
   positions: Position[];
-  welcomeMessage: Message;
+  initialMessages: Message[];
 };
 
 export type MarketTick = {
@@ -28,6 +23,7 @@ export type AgentReply = {
   proposedAction?: {
     label: string;
     summary: string;
+    strategyId?: number;
   };
 };
 
@@ -37,25 +33,24 @@ export type GatewayRequestOptions = {
 };
 
 export type TradingApiEndpoints = {
-  dashboard: string;
-  marketTick: string;
-  agentParse: string;
+  strategies: string;
+  approveStrategy: (id: number) => string;
+  chat: string;
+  chatHistory: string;
 };
 
 export const TRADING_API_ENDPOINTS: TradingApiEndpoints = {
-  dashboard: "/dashboard",
-  marketTick: "/market/tick",
-  agentParse: "/agent/parse",
-};
-
-export type MarketTickRequest = {
-  previousPrice: number;
-  previousFunding: number;
-  positions: Position[];
+  strategies: "/api/strategies",
+  approveStrategy: (id: number) => `/api/strategies/${id}/approve`,
+  chat: "/api/chat",
+  chatHistory: "/api/chat/history",
 };
 
 export type AgentPromptRequest = {
-  prompt: string;
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
 };
 
 export type BackendErrorResponse = {
@@ -65,6 +60,12 @@ export type BackendErrorResponse = {
 
 export type TradingGateway = {
   mode: GatewayMode;
+  getStrategies: (
+    options?: GatewayRequestOptions,
+  ) => Promise<StrategyDto[]>;
+  findLatestPendingStrategyId: (
+    options?: GatewayRequestOptions,
+  ) => Promise<number | null>;
   getInitialDashboardState: (
     options?: GatewayRequestOptions,
   ) => Promise<InitialDashboardState>;
@@ -76,46 +77,44 @@ export type TradingGateway = {
   ) => Promise<MarketTick>;
   sendPrompt: (
     prompt: string,
+    history: Message[],
     options?: GatewayRequestOptions,
   ) => Promise<AgentReply>;
+  approveStrategy: (
+    strategyId: number,
+    options?: GatewayRequestOptions,
+  ) => Promise<void>;
 };
 
-function getRandomMockResponse() {
-  const idx = Math.floor(Math.random() * MOCK_RESPONSES.length);
-  return MOCK_RESPONSES[idx];
-}
+type Side = "buy" | "sell";
+type StrategyStatus =
+  | "waiting"
+  | "approved"
+  | "triggered"
+  | "stopped"
+  | "failed"
+  | "queued";
 
-function createMockTradingGateway(): TradingGateway {
-  return {
-    mode: "mock",
-    async getInitialDashboardState() {
-      return {
-        solPrice: 131.42,
-        chg: 1.96,
-        fund: 0.031,
-        positions: INITIAL_POSITIONS,
-        welcomeMessage: {
-          role: "agent",
-          text: "Ask about markets, positions, and risk. I can help in real time.",
-        },
-      };
-    },
-    async getMarketTick(previousPrice, previousFunding, positions) {
-      const nextTick = getNextMarketTick(previousPrice, previousFunding);
+type StrategyDto = {
+  id: number;
+  symbol: string;
+  side: string;
+  leverage: number;
+  price: string | number;
+  quantity: string | number;
+  status: string;
+};
 
-      return {
-        nextPrice: nextTick.nextPrice,
-        pctChange: nextTick.pctChange,
-        nextFunding: nextTick.nextFunding,
-        positions: updatePositionMarks(positions, nextTick.nextPrice),
-      };
-    },
-    async sendPrompt() {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      return getRandomMockResponse();
-    },
-  };
-}
+type ChatResponseDto = {
+  content: string;
+};
+
+type ChatHistoryResponseDto = {
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+};
 
 function normalizeBaseUrl(url: string) {
   return url.endsWith("/") ? url.slice(0, -1) : url;
@@ -137,8 +136,14 @@ async function fetchJson<T>(
     let backendErrorMessage: string | undefined;
 
     try {
-      const maybeError = (await response.json()) as BackendErrorResponse;
-      backendErrorMessage = maybeError.message;
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const maybeError = (await response.json()) as BackendErrorResponse;
+        backendErrorMessage = maybeError.message;
+      } else {
+        const text = await response.text();
+        backendErrorMessage = text || undefined;
+      }
     } catch {
       // Ignore JSON parsing failures and fallback to status-based message.
     }
@@ -151,6 +156,21 @@ async function fetchJson<T>(
   return (await response.json()) as T;
 }
 
+async function fetchVoid(input: RequestInfo, init?: RequestInit): Promise<void> {
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `Gateway request failed: ${response.status}`);
+  }
+}
+
 function buildGatewayHeaders(extraHeaders?: HeadersInit): HeadersInit {
   // Backend integration point:
   // Add auth/session headers here when backend enables protected endpoints.
@@ -160,54 +180,267 @@ function buildGatewayHeaders(extraHeaders?: HeadersInit): HeadersInit {
   };
 }
 
+function toNumber(value: string | number | null | undefined, fallback = 0) {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeStrategyStatus(status: string): StrategyStatus {
+  const normalized = status.toLowerCase();
+
+  switch (normalized) {
+    case "waiting":
+    case "approved":
+    case "triggered":
+    case "stopped":
+    case "failed":
+    case "queued":
+      return normalized;
+    default:
+      return "waiting";
+  }
+}
+
+function normalizeSide(side: string): Side {
+  return side.toLowerCase() === "buy" ? "buy" : "sell";
+}
+
+function toPositionLifecycle(status: string): Position["lifecycle"] {
+  const normalizedStatus = normalizeStrategyStatus(status);
+
+  if (
+    normalizedStatus === "triggered" ||
+    normalizedStatus === "stopped" ||
+    normalizedStatus === "failed"
+  ) {
+    return "processed";
+  }
+
+  return "active";
+}
+
+function mapStrategyStatusToPositionStatus(status: string): Position["status"] {
+  const normalizedStatus = normalizeStrategyStatus(status);
+
+  if (normalizedStatus === "triggered") {
+    return "triggered";
+  }
+
+  if (normalizedStatus === "approved" || normalizedStatus === "queued") {
+    return "manual";
+  }
+
+  return "watching";
+}
+
+function mapStrategiesToPositions(strategies: StrategyDto[]): Position[] {
+  // Exclude pending strategies and split view in UI via lifecycle field.
+  return strategies
+    .filter(
+      (strategy) => normalizeStrategyStatus(strategy.status) !== "waiting",
+    )
+    .map((strategy) => {
+    const entry = toNumber(strategy.price);
+    const size = toNumber(strategy.quantity);
+    const normalizedSide = normalizeSide(strategy.side);
+    const side: Position["side"] = normalizedSide === "buy" ? "long" : "short";
+    const leverage = Math.max(strategy.leverage || 1, 1);
+    const pnlSign = side === "long" ? 1 : -1;
+
+    return {
+      id: strategy.id,
+      market: `${strategy.symbol}-PERP`,
+      side,
+      size: `${size} ${strategy.symbol.replace("USDT", "")}`,
+      entry,
+      mark: entry,
+      pnl: Number((entry * 0.005 * leverage * pnlSign).toFixed(2)),
+      status: mapStrategyStatusToPositionStatus(strategy.status),
+      lifecycle: toPositionLifecycle(strategy.status),
+    };
+  });
+}
+
+function extractLatestPrice(strategies: StrategyDto[], fallback: number) {
+  const firstWithPrice = strategies.find((strategy) => strategy.price !== null);
+  if (!firstWithPrice) {
+    return fallback;
+  }
+  return toNumber(firstWithPrice.price, fallback);
+}
+
+function mapChatHistoryToMessages(history: ChatHistoryResponseDto): Message[] {
+  // UI uses "agent" role while backend uses "assistant".
+  return history.messages.map((message) => ({
+    role: message.role === "assistant" ? "agent" : "user",
+    text: message.content,
+  }));
+}
+
+function toChatHistory(
+  messages: Message[],
+): AgentPromptRequest["messages"] {
+  // Chat endpoint expects backend role names, so convert UI role names back.
+  return messages.map((message) => ({
+    role: message.role === "agent" ? "assistant" : "user",
+    content: message.text,
+  }));
+}
+
+function buildCurrentDayRange() {
+  // Current backend API requires explicit history window via from/to query params.
+  // Keep chat bootstrapping scoped to today's messages only.
+  const now = new Date();
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+
+  return {
+    from: from.toISOString(),
+    to: now.toISOString(),
+  };
+}
+
 function createHttpTradingGateway(baseUrl: string): TradingGateway {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
   return {
     mode: "http",
-    getInitialDashboardState(options) {
-      return fetchJson<InitialDashboardState>(
-        `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.dashboard}`,
+    async getStrategies(options) {
+      return fetchJson<StrategyDto[]>(
+        `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.strategies}`,
         {
           signal: options?.signal,
           headers: buildGatewayHeaders(options?.headers),
         },
       );
     },
-    getMarketTick(previousPrice, previousFunding, positions, options) {
-      const requestBody: MarketTickRequest = {
-        previousPrice,
-        previousFunding,
-        positions,
-      };
+    async findLatestPendingStrategyId(options) {
+      const strategies = await fetchJson<StrategyDto[]>(
+        `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.strategies}`,
+        {
+          signal: options?.signal,
+          headers: buildGatewayHeaders(options?.headers),
+        },
+      );
 
-      return fetchJson<MarketTick>(`${normalizedBaseUrl}${TRADING_API_ENDPOINTS.marketTick}`, {
-        method: "POST",
-        signal: options?.signal,
-        headers: buildGatewayHeaders(options?.headers),
-        body: JSON.stringify(requestBody),
-      });
+      const pending = strategies.filter(
+        (strategy) => normalizeStrategyStatus(strategy.status) === "waiting",
+      );
+
+      if (pending.length === 0) {
+        return null;
+      }
+
+      return pending.reduce((latest, strategy) =>
+        strategy.id > latest.id ? strategy : latest,
+      ).id;
     },
-    sendPrompt(prompt, options) {
-      const requestBody: AgentPromptRequest = { prompt };
+    async getInitialDashboardState(options) {
+      // Bootstrap combines strategy state and recent chat history into one UI snapshot.
+      const [strategies, history] = await Promise.all([
+        this.getStrategies(options),
+        (async () => {
+          const { from, to } = buildCurrentDayRange();
+          const params = new URLSearchParams({ from, to });
+
+          try {
+            return await fetchJson<ChatHistoryResponseDto>(
+              `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.chatHistory}?${params.toString()}`,
+              {
+                signal: options?.signal,
+                headers: buildGatewayHeaders(options?.headers),
+              },
+            );
+          } catch {
+            return { messages: [] };
+          }
+        })(),
+      ]);
+
+      const positions = mapStrategiesToPositions(strategies);
+      const solPrice = extractLatestPrice(strategies, 131.42);
+      const initialMessages = mapChatHistoryToMessages(history);
+      if (initialMessages.length === 0) {
+        initialMessages.push({
+          role: "agent",
+          text: "Connected to backend. Ask me about strategy status and approvals.",
+        });
+      }
+
+      return {
+        solPrice,
+        chg: 0,
+        // No dedicated funding endpoint in current contract.
+        fund: 0,
+        positions,
+        initialMessages,
+      };
+    },
+    async getMarketTick(previousPrice, previousFunding, _positions, options) {
+      // Contract-only refresh: market view is derived from current strategies list.
+      const strategies = await this.getStrategies(options);
+      const mappedPositions = mapStrategiesToPositions(strategies);
+      const nextPrice = extractLatestPrice(strategies, previousPrice);
+      const pctChange =
+        previousPrice === 0
+          ? 0
+          : Number((((nextPrice - previousPrice) / previousPrice) * 100).toFixed(2));
+
+      return {
+        nextPrice,
+        pctChange,
+        nextFunding: previousFunding,
+        positions: mappedPositions,
+      };
+    },
+    async sendPrompt(prompt, history, options) {
+      // Preserve conversation context by sending full message history required by /api/chat/.
+      const requestBody: AgentPromptRequest = {
+        messages: [
+          ...toChatHistory(history),
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      };
 
       // Backend integration point:
       // If agent endpoint starts streaming (SSE/WebSocket), replace this call
       // with a streaming client and push partial tokens into chat state.
-      return fetchJson<AgentReply>(`${normalizedBaseUrl}${TRADING_API_ENDPOINTS.agentParse}`, {
-        method: "POST",
-        signal: options?.signal,
-        headers: buildGatewayHeaders(options?.headers),
-        body: JSON.stringify(requestBody),
-      });
+      const response = await fetchJson<ChatResponseDto>(
+        `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.chat}`,
+        {
+          method: "POST",
+          signal: options?.signal,
+          headers: buildGatewayHeaders(options?.headers),
+          body: JSON.stringify(requestBody),
+        },
+      );
+
+      return {
+        text: response.content,
+      };
+    },
+    async approveStrategy(strategyId, options) {
+      // Explicit approval step for pending strategy actions from chat confirmations.
+      await fetchVoid(
+        `${normalizedBaseUrl}${TRADING_API_ENDPOINTS.approveStrategy(strategyId)}`,
+        {
+          method: "POST",
+          signal: options?.signal,
+          headers: buildGatewayHeaders(options?.headers),
+        },
+      );
     },
   };
 }
 
 export function createTradingGateway(): TradingGateway {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_TRADING_API_URL;
-  if (apiBaseUrl) {
-    return createHttpTradingGateway(apiBaseUrl);
-  }
-  return createMockTradingGateway();
+  const apiBaseUrl = process.env.NEXT_PUBLIC_TRADING_API_URL ?? "";
+  return createHttpTradingGateway(apiBaseUrl);
 }

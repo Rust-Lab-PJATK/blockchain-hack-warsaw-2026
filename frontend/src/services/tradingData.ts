@@ -21,6 +21,7 @@ export const INITIAL_POSITIONS: Position[] = [
     mark: 131.42,
     pnl: 75.6,
     status: "triggered",
+    lifecycle: "processed",
   },
   {
     market: "ETH-PERP",
@@ -30,6 +31,7 @@ export const INITIAL_POSITIONS: Position[] = [
     mark: 3398,
     pnl: 44,
     status: "manual",
+    lifecycle: "active",
   },
   {
     market: "BTC-PERP",
@@ -39,5 +41,6 @@ export const INITIAL_POSITIONS: Position[] = [
     mark: 66850,
     pnl: -87.5,
     status: "watching",
+    lifecycle: "active",
   },
 ];

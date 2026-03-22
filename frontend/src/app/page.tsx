@@ -9,6 +9,7 @@ import {
 } from "react";
 import GlobalChatInput from "@/components/GlobalChatInput";
 import { ChatPanel } from "@/components/ChatPanel";
+import NotificationCenter from "@/components/NotificationCenter";
 import { PortfolioPanel } from "@/components/PortfolioPanel";
 import { Topbar } from "@/components/Topbar";
 import { TradingPanel } from "@/components/TradingPanel";
@@ -88,6 +89,8 @@ function DashboardContent() {
     pendingActionSummary,
     lastError,
     connectionMode,
+    notifications,
+    dismissNotification,
   } = useTradingDashboardContext();
 
   useEffect(() => {
@@ -375,6 +378,11 @@ function DashboardContent() {
           AI
         </button>
       ) : null}
+
+      <NotificationCenter
+        notifications={notifications}
+        dismissNotification={dismissNotification}
+      />
     </div>
   );
 }

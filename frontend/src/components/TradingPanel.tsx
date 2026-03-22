@@ -20,6 +20,65 @@ export function TradingPanel({
   positions,
 }: TradingPanelProps) {
   const isPositive = chg >= 0;
+  const activePositions = positions.filter(
+    (position) => position.lifecycle === "active",
+  );
+  const processedPositions = positions.filter(
+    (position) => position.lifecycle === "processed",
+  );
+
+  function renderTable(rows: Position[], emptyText: string) {
+    if (rows.length === 0) {
+      return <div className="td-table-empty">{emptyText}</div>;
+    }
+
+    return (
+      <div className="td-table-wrap">
+        <table className="td-table">
+          <thead>
+            <tr className="td-table-head-row">
+              {["Market", "Side", "Size", "Entry", "Mark", "PnL", "Status"].map(
+                (h) => (
+                  <th key={h} className="td-table-heading">
+                    {h}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => (
+              <tr key={`${p.market}-${i}`} className="td-table-row">
+                <td className="td-table-cell td-table-mono">{p.market}</td>
+                <td className="td-table-cell">
+                  <SideBadge side={p.side} />
+                </td>
+                <td className="td-table-cell td-table-text">{p.size}</td>
+                <td className="td-table-cell td-table-text td-table-mono">
+                  ${p.entry.toFixed(2)}
+                </td>
+                <td className="td-table-cell td-table-mono">
+                  ${p.mark.toFixed(2)}
+                </td>
+                <td className="td-table-cell">
+                  <span
+                    className={`td-pnl-value ${
+                      p.pnl >= 0 ? "td-pnl-positive" : "td-pnl-negative"
+                    }`}
+                  >
+                    {p.pnl >= 0 ? "+" : ""}${p.pnl.toFixed(2)}
+                  </span>
+                </td>
+                <td className="td-table-cell">
+                  <Badge status={p.status} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     <div className="td-trading">
@@ -56,49 +115,15 @@ export function TradingPanel({
         </div>
       </div>
 
-      <div className="td-table-wrap">
-        <table className="td-table">
-          <thead>
-            <tr className="td-table-head-row">
-              {["Market", "Side", "Size", "Entry", "Mark", "PnL", "Status"].map(
-                (h) => (
-                  <th key={h} className="td-table-heading">
-                    {h}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {positions.map((p, i) => (
-              <tr key={`${p.market}-${i}`} className="td-table-row">
-                <td className="td-table-cell td-table-mono">{p.market}</td>
-                <td className="td-table-cell">
-                  <SideBadge side={p.side} />
-                </td>
-                <td className="td-table-cell td-table-text">{p.size}</td>
-                <td className="td-table-cell td-table-text td-table-mono">
-                  ${p.entry.toFixed(2)}
-                </td>
-                <td className="td-table-cell td-table-mono">
-                  ${p.mark.toFixed(2)}
-                </td>
-                <td className="td-table-cell">
-                  <span
-                    className={`td-pnl-value ${
-                      p.pnl >= 0 ? "td-pnl-positive" : "td-pnl-negative"
-                    }`}
-                  >
-                    {p.pnl >= 0 ? "+" : ""}${p.pnl.toFixed(2)}
-                  </span>
-                </td>
-                <td className="td-table-cell">
-                  <Badge status={p.status} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="td-trade-split">
+        <section className="td-trade-column">
+          <header className="td-trade-column-header">Active</header>
+          {renderTable(activePositions, "No active trades.")}
+        </section>
+        <section className="td-trade-column">
+          <header className="td-trade-column-header">Processed</header>
+          {renderTable(processedPositions, "No processed trades yet.")}
+        </section>
       </div>
     </div>
   );
