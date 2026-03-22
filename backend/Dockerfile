@@ -23,6 +23,11 @@ RUN if [ "$ENABLE_DRIFT" = "true" ]; then \
         cargo build --release --bin backend-cli; \
     fi
 
+# Collect runtime shared libs produced by drift-rs build script (if drift feature is enabled).
+RUN mkdir -p /app/runtime-libs \
+    && find /app/target/release/build -name 'libdrift_ffi_sys.so' -exec cp {} /app/runtime-libs/ \; \
+    || true
+
 FROM debian:bookworm-slim AS runner
 
 WORKDIR /app
@@ -32,10 +37,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/backend-cli /usr/local/bin/backend-cli
+COPY --from=builder /app/runtime-libs/ /usr/local/lib/
 COPY --from=builder /app/config ./config
 
 ENV RUST_LOG=info \
-    PORT=5150
+    PORT=5150 \
+    LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
 
 EXPOSE 5150
 
