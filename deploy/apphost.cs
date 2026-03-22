@@ -34,7 +34,7 @@ migrations.WaitFor(postgresdb);
 webApi.WaitForCompletion(migrations);
 
 var frontend = builder.AddDockerfile("frontend", "../frontend")
-    .WithHttpEndpoint(targetPort: 3000, port: 3000, env: "PORT")
+    .WithHttpEndpoint(targetPort: 80, port: 80, env: "PORT", isProxied: false)
     .WithHttpHealthCheck("/")
     .WithExternalHttpEndpoints()
     .WithEnvironment("HOSTNAME", "0.0.0.0")
