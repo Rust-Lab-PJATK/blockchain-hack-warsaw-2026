@@ -8,6 +8,9 @@ var compose = builder.AddDockerComposeEnvironment("compose");
 
 var postgresUser = builder.AddParameter("postgres-user", "loco");
 var postgresPassword = builder.AddParameter("postgres-password", "loco", secret: true);
+var webApiEnableDrift = builder.AddParameter("enable-drift", "false");
+var heliusApiKey = builder.AddParameter("helius-api-key", "COPY_CREDS_HERE", secret: true);
+var walletPrivateKey = builder.AddParameter("wallet-private-key", "COPY_CREDS_HERE", secret: true);
 
 var postgres = builder.AddPostgres("postgres")
     .WithUserName(postgresUser)
@@ -18,20 +21,26 @@ var postgres = builder.AddPostgres("postgres")
 var postgresdb = postgres.AddDatabase("db");
 
 var webApi = builder.AddDockerfile("web-api", "../backend")
+    .WithBuildArg("ENABLE_DRIFT", webApiEnableDrift)
     .WithEnvironment("DATABASE_URL", postgresdb.Resource.UriExpression)
+    .WithEnvironment("HELIUS_API_KEY", heliusApiKey)
+    .WithEnvironment("WALLET_PRIVATE_KEY", walletPrivateKey)
     .WithHttpEndpoint(targetPort: 5150, port: 5150, env: "PORT", isProxied: false)
     .WithHttpHealthCheck("/")
     .WithExternalHttpEndpoints()
     .WithComputeEnvironment(compose);
 
+webApi.WaitFor(postgresdb);
+
 var migrations = builder.AddDockerfile("migrations", "../backend")
     .WithEntrypoint("backend-cli")
     .WithArgs("db", "migrate")
     .WithEnvironment("DATABASE_URL", postgresdb.Resource.UriExpression)
+    .WithEnvironment("HELIUS_API_KEY", heliusApiKey)
+    .WithEnvironment("WALLET_PRIVATE_KEY", walletPrivateKey)
     .WithComputeEnvironment(compose);
 
 migrations.WaitFor(postgresdb);
-webApi.WaitForCompletion(migrations);
 
 var frontend = builder.AddDockerfile("frontend", "../frontend")
     .WithHttpEndpoint(targetPort: 80, port: 80, env: "PORT", isProxied: false)

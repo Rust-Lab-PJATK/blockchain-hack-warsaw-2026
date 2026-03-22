@@ -15,8 +15,13 @@ RUN apt-get update \
 RUN rustup component add rustfmt
 COPY . .
 
-RUN rustup install 1.76.0-x86_64-unknown-linux-gnu
-RUN cargo build --release --features drift --bin backend-cli
+ARG ENABLE_DRIFT=false
+RUN if [ "$ENABLE_DRIFT" = "true" ]; then \
+        rustup install 1.76.0-x86_64-unknown-linux-gnu \
+        && cargo build --release --features drift --bin backend-cli; \
+    else \
+        cargo build --release --bin backend-cli; \
+    fi
 
 FROM debian:bookworm-slim AS runner
 
