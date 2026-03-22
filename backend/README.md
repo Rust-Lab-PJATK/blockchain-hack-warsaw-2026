@@ -5,7 +5,6 @@
 This is the **SaaS starter** which includes a `User` model and authentication based on JWT.
 It also include configuration sections that help you pick either a frontend or a server-side template set up for your fullstack server.
 
-
 ## Quick Start
 
 ```sh
@@ -52,6 +51,13 @@ listening on http://localhost:5150
 
 You can check your [configuration](config/development.yaml) to pick either frontend setup or server-side rendered template, and activate the relevant configuration sections.
 
+## Drift Market Data Notes
+
+When backend is built with the `drift` feature:
+
+- `price` and `volume_24h` come from Drift SDK on-chain market account data.
+- `high_24h`, `low_24h`, `open_24h`, and `change_pct` are computed from Drift DLOB REST API trades (`/trades?marketType=perp`).
+- If DLOB request fails or times out, backend falls back to oracle-price approximation (`high=low=open=price`, `change_pct=0.0`) and logs a warning.
 
 ## Getting help
 
