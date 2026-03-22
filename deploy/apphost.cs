@@ -14,6 +14,7 @@ var walletPrivateKey = builder.AddParameter("wallet-private-key", "COPY_CREDS_HE
 var aiGatewayUrl = builder.AddParameter("ai-gateway-url", "COPY_CREDS_HERE");
 var aiGatewayKey = builder.AddParameter("ai-gateway-key", "COPY_CREDS_HERE", secret: true);
 var aiGatewayModel = builder.AddParameter("ai-gateway-model", "anthropic/claude-sonnet-4-6");
+var nextPublicTradingApiUrl = builder.AddParameter("next-public-trading-api-url", "http://localhost:5150");
 
 var postgres = builder.AddPostgres("postgres")
     .WithUserName(postgresUser)
@@ -49,10 +50,12 @@ var migrations = builder.AddDockerfile("migrations", "../backend")
 migrations.WaitFor(postgresdb);
 
 var frontend = builder.AddDockerfile("frontend", "../frontend")
+    .WithBuildArg("NEXT_PUBLIC_TRADING_API_URL", nextPublicTradingApiUrl)
     .WithHttpEndpoint(targetPort: 80, port: 80, env: "PORT", isProxied: false)
     .WithHttpHealthCheck("/")
     .WithExternalHttpEndpoints()
     .WithEnvironment("HOSTNAME", "0.0.0.0")
+    .WithEnvironment("NEXT_PUBLIC_TRADING_API_URL", nextPublicTradingApiUrl)
     .WithEnvironment("WEB_API_HTTP", webApi.GetEndpoint("http"))
     .WithComputeEnvironment(compose);
 

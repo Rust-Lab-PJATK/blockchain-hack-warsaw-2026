@@ -12,6 +12,9 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder
 
+ARG NEXT_PUBLIC_TRADING_API_URL
+ENV NEXT_PUBLIC_TRADING_API_URL=${NEXT_PUBLIC_TRADING_API_URL}
+
 COPY . .
 RUN pnpm build
 
@@ -20,6 +23,7 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=80
+ENV NEXT_PUBLIC_TRADING_API_URL=
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
