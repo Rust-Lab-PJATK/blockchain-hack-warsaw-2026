@@ -63,13 +63,16 @@ impl PerpAmount {
 }
 
 /// Variables available for Lua condition evaluation, returned by `get_market_data`.
+/// 
+/// Data is fetched from Drift's on-chain oracle (Pyth oracle integration via Drift SDK).
+/// Some fields use current price as approximation since Drift SDK doesn't provide historical data.
 pub const MARKET_DATA_VARIABLES: &[(&str, &str)] = &[
-    ("price", "Current market price of the asset"),
-    ("volume", "Current trading volume (24h)"),
-    ("high_24h", "24h high price"),
-    ("low_24h", "24h low price"),
-    ("open_24h", "24h open price"),
-    ("change_pct", "24h price change percentage"),
+    ("price", "Real oracle price from Drift's on-chain oracle/Pyth (precision: 1e6). Updated on-chain based on oracle feeds."),
+    ("volume", "Not available from Drift SDK. Returns 0.0 (would require external market data source)."),
+    ("high_24h", "24h high price estimate (approximated using current oracle price due to SDK limitations)."),
+    ("low_24h", "24h low price estimate (approximated using current oracle price due to SDK limitations)."),
+    ("open_24h", "24h open price estimate (approximated using current oracle price due to SDK limitations)."),
+    ("change_pct", "24h price change percentage. Not available from Drift SDK. Returns 0.0 (would require historical price snapshots)."),
 ];
 
 #[async_trait]
@@ -107,6 +110,47 @@ mod real {
     };
 
     const SUB_ACCOUNT_ID: u16 = 0;
+
+    /// Map symbol strings (case-insensitive) to PerpMarket enum values
+    fn symbol_to_perp_market(symbol: &str) -> Result<PerpMarket> {
+        use PerpMarket::*;
+        match symbol.to_uppercase().as_str() {
+            "SOL" => Ok(SOL),
+            "BTC" => Ok(BTC),
+            "ETH" => Ok(ETH),
+            "APT" => Ok(APT),
+            "BONK" => Ok(BONK),
+            "POL" => Ok(POL),
+            "ARB" => Ok(ARB),
+            "DOGE" => Ok(DOGE),
+            "BNB" => Ok(BNB),
+            "SUI" => Ok(SUI),
+            "PEPE" => Ok(PEPE),
+            "OP" => Ok(OP),
+            "RENDER" => Ok(RENDER),
+            "XRP" => Ok(XRP),
+            "HNT" => Ok(HNT),
+            "INJ" => Ok(INJ),
+            "LINK" => Ok(LINK),
+            "RLB" => Ok(RLB),
+            "PYTH" => Ok(PYTH),
+            "TIA" => Ok(TIA),
+            "JTO" => Ok(JTO),
+            "SEI" => Ok(SEI),
+            "AVAX" => Ok(AVAX),
+            "W" => Ok(W),
+            "KMNO" => Ok(KMNO),
+            "WEN" => Ok(WEN),
+            "TRUMPWIN2024" => Ok(TrumpWin2024),
+            "KAMALAPOPULARVOTE2024" => Ok(KamalaPopularVote2024),
+            "RANDOM2024" => Ok(Random2024),
+            "NVDA" => Ok(NVDA),
+            _ => Err(Error::BadRequest(format!(
+                "unknown perp market symbol: {}",
+                symbol
+            ))),
+        }
+    }
 
     pub struct DriftService {
         client: DriftClient,
@@ -239,16 +283,28 @@ mod real {
             Ok(sig.to_string())
         }
 
-        async fn get_market_data(&self, _symbol: &str) -> Result<MarketData> {
-            // TODO: fetch real oracle price from Drift's on-chain oracle / Pyth
-            // For now return the perp market oracle price if available
+        async fn get_market_data(&self, symbol: &str) -> Result<MarketData> {
+            let market = symbol_to_perp_market(symbol)?;
+            let market_account = self
+                .client
+                .get_perp_market_account(market as u16)
+                .await
+                .map_err(Error::wrap)?;
+            
+            let price = market_account.amm.historical_oracle_data.last_oracle_price as f64 / 1_000_000.0;
+            let mark_price_twap_5min = market_account.amm.last_mark_price_twap5min as f64 / 1_000_000.0;
+            
+            let volume_24h = market_account.amm.volume24h as f64;
+            
             let mut data = HashMap::new();
-            data.insert("price".to_string(), 0.0);
-            data.insert("volume".to_string(), 0.0);
-            data.insert("high_24h".to_string(), 0.0);
-            data.insert("low_24h".to_string(), 0.0);
-            data.insert("open_24h".to_string(), 0.0);
-            data.insert("change_pct".to_string(), 0.0);
+            data.insert("price".to_string(), price);
+            data.insert("volume".to_string(), volume_24h);
+            data.insert("volume_24h".to_string(), volume_24h);
+            data.insert("high_24h".to_string(), price);  // Use current price as approximation
+            data.insert("low_24h".to_string(), price);   // Use current price as approximation
+            data.insert("open_24h".to_string(), mark_price_twap_5min);  // Use 5min TWAP as proxy
+            data.insert("change_pct".to_string(), 0.0);  // Would need historical data
+            
             Ok(data)
         }
 
