@@ -4,6 +4,26 @@ use std::collections::HashMap;
 pub type SignatureText = String;
 pub type MarketData = HashMap<String, f64>;
 
+#[cfg(any(feature = "drift", test))]
+fn resolve_ohlcv_with_fallback(
+    symbol: &str,
+    market_index: u16,
+    price: f64,
+    fetched: Result<(f64, f64, f64, f64)>,
+) -> (f64, f64, f64, f64) {
+    match fetched {
+        Ok(values) => values,
+        Err(err) => {
+            tracing::warn!(
+                "dlob ohlcv fetch failed for symbol={symbol}, market_index={}: {}",
+                market_index,
+                err
+            );
+            (price, price, price, 0.0)
+        }
+    }
+}
+
 #[repr(u16)]
 #[derive(Debug, Clone, Copy)]
 pub enum PerpMarket {
@@ -62,14 +82,13 @@ impl PerpAmount {
     }
 }
 
-/// Variables available for Lua condition evaluation, returned by `get_market_data`.
 pub const MARKET_DATA_VARIABLES: &[(&str, &str)] = &[
-    ("price", "Current market price of the asset"),
-    ("volume", "Current trading volume (24h)"),
-    ("high_24h", "24h high price"),
-    ("low_24h", "24h low price"),
-    ("open_24h", "24h open price"),
-    ("change_pct", "24h price change percentage"),
+    ("price", "Real oracle price from Drift's on-chain oracle/Pyth (precision: 1e6). Updated on-chain based on oracle feeds."),
+    ("volume", "24h volume from Drift SDK market account (raw protocol units)."),
+    ("high_24h", "Highest traded price from the last 24h window, computed from Drift DLOB REST API trades."),
+    ("low_24h", "Lowest traded price from the last 24h window, computed from Drift DLOB REST API trades."),
+    ("open_24h", "Oldest trade price in the 24h window (open reference), computed from Drift DLOB REST API trades."),
+    ("change_pct", "Percentage change over 24h: (close - open) / open * 100, computed from Drift DLOB REST API trades."),
 ];
 
 #[async_trait]
@@ -100,6 +119,7 @@ pub trait DriftProvider: Send + Sync {
 mod real {
     use super::*;
     use std::borrow::Cow;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use drift_rs::{
         types::{accounts::User, MarketId},
@@ -107,6 +127,111 @@ mod real {
     };
 
     const SUB_ACCOUNT_ID: u16 = 0;
+    const DLOB_TRADES_URL: &str = "https://dlob.drift.trade/trades";
+    const PRICE_PRECISION: f64 = 1_000_000.0;
+    const WINDOW_24H_SECS: u64 = 86_400;
+
+    fn parse_price_value(value: &serde_json::Value) -> Option<f64> {
+        if let Some(raw) = value.as_u64() {
+            return Some(raw as f64 / PRICE_PRECISION);
+        }
+
+        if let Some(raw) = value.as_str().and_then(|s| s.parse::<u64>().ok()) {
+            return Some(raw as f64 / PRICE_PRECISION);
+        }
+
+        None
+    }
+
+    pub(super) fn parse_ohlcv_from_dlob_response(
+        response: &serde_json::Value,
+        now_secs: u64,
+    ) -> Result<(f64, f64, f64, f64)> {
+        let records = response
+            .get("records")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| Error::Message("dlob: missing records array".to_string()))?;
+
+        if records.is_empty() {
+            return Ok((0.0, 0.0, 0.0, 0.0));
+        }
+
+        let cutoff = now_secs.saturating_sub(WINDOW_24H_SECS);
+        let prices_24h: Vec<f64> = records
+            .iter()
+            .filter_map(|record| {
+                let ts = record.get("ts")?.as_u64()?;
+                if ts < cutoff {
+                    return None;
+                }
+                parse_price_value(record.get("price")?)
+            })
+            .collect();
+
+        if prices_24h.is_empty() {
+            return Ok((0.0, 0.0, 0.0, 0.0));
+        }
+
+        let high_24h = prices_24h
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let low_24h = prices_24h.iter().copied().fold(f64::INFINITY, f64::min);
+        let open_24h = *prices_24h
+            .last()
+            .ok_or_else(|| Error::Message("dlob: missing open_24h value".to_string()))?;
+        let close_24h = *prices_24h
+            .first()
+            .ok_or_else(|| Error::Message("dlob: missing close_24h value".to_string()))?;
+        let change_pct = if open_24h > 0.0 {
+            (close_24h - open_24h) / open_24h * 100.0
+        } else {
+            0.0
+        };
+
+        Ok((high_24h, low_24h, open_24h, change_pct))
+    }
+
+    /// Map symbol strings (case-insensitive) to PerpMarket enum values
+    fn symbol_to_perp_market(symbol: &str) -> Result<PerpMarket> {
+        use PerpMarket::*;
+        match symbol.to_uppercase().as_str() {
+            "SOL" => Ok(SOL),
+            "BTC" => Ok(BTC),
+            "ETH" => Ok(ETH),
+            "APT" => Ok(APT),
+            "BONK" => Ok(BONK),
+            "POL" => Ok(POL),
+            "ARB" => Ok(ARB),
+            "DOGE" => Ok(DOGE),
+            "BNB" => Ok(BNB),
+            "SUI" => Ok(SUI),
+            "PEPE" => Ok(PEPE),
+            "OP" => Ok(OP),
+            "RENDER" => Ok(RENDER),
+            "XRP" => Ok(XRP),
+            "HNT" => Ok(HNT),
+            "INJ" => Ok(INJ),
+            "LINK" => Ok(LINK),
+            "RLB" => Ok(RLB),
+            "PYTH" => Ok(PYTH),
+            "TIA" => Ok(TIA),
+            "JTO" => Ok(JTO),
+            "SEI" => Ok(SEI),
+            "AVAX" => Ok(AVAX),
+            "W" => Ok(W),
+            "KMNO" => Ok(KMNO),
+            "WEN" => Ok(WEN),
+            "TRUMPWIN2024" => Ok(TrumpWin2024),
+            "KAMALAPOPULARVOTE2024" => Ok(KamalaPopularVote2024),
+            "RANDOM2024" => Ok(Random2024),
+            "NVDA" => Ok(NVDA),
+            _ => Err(Error::BadRequest(format!(
+                "unknown perp market symbol: {}",
+                symbol
+            ))),
+        }
+    }
 
     pub struct DriftService {
         client: DriftClient,
@@ -116,6 +241,34 @@ mod real {
         pub async fn new(ctx: &AppContext) -> Result<Self> {
             let client = create_drift_client(ctx).await?;
             Ok(Self { client })
+        }
+
+        pub(super) async fn fetch_ohlcv_from_drift_api(
+            market_index: u16,
+        ) -> Result<(f64, f64, f64, f64)> {
+            let response: serde_json::Value = reqwest::Client::new()
+                .get(DLOB_TRADES_URL)
+                .query(&[
+                    ("marketIndex", market_index.to_string()),
+                    ("marketType", "perp".to_string()),
+                    ("limit", "5000".to_string()),
+                ])
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await
+                .map_err(Error::wrap)?
+                .error_for_status()
+                .map_err(Error::wrap)?
+                .json()
+                .await
+                .map_err(Error::wrap)?;
+
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            parse_ohlcv_from_dlob_response(&response, now_secs)
         }
     }
 
@@ -239,16 +392,34 @@ mod real {
             Ok(sig.to_string())
         }
 
-        async fn get_market_data(&self, _symbol: &str) -> Result<MarketData> {
-            // TODO: fetch real oracle price from Drift's on-chain oracle / Pyth
-            // For now return the perp market oracle price if available
+        async fn get_market_data(&self, symbol: &str) -> Result<MarketData> {
+            let market = symbol_to_perp_market(symbol)?;
+            let market_account = self
+                .client
+                .get_perp_market_account(market as u16)
+                .await
+                .map_err(Error::wrap)?;
+
+            let price = market_account.amm.historical_oracle_data.last_oracle_price as f64
+                / PRICE_PRECISION;
+            let volume_24h = market_account.amm.volume24h as f64;
+
+            let (high_24h, low_24h, open_24h, change_pct) = resolve_ohlcv_with_fallback(
+                symbol,
+                market as u16,
+                price,
+                Self::fetch_ohlcv_from_drift_api(market as u16).await,
+            );
+
             let mut data = HashMap::new();
-            data.insert("price".to_string(), 0.0);
-            data.insert("volume".to_string(), 0.0);
-            data.insert("high_24h".to_string(), 0.0);
-            data.insert("low_24h".to_string(), 0.0);
-            data.insert("open_24h".to_string(), 0.0);
-            data.insert("change_pct".to_string(), 0.0);
+            data.insert("price".to_string(), price);
+            data.insert("volume".to_string(), volume_24h);
+            data.insert("volume_24h".to_string(), volume_24h);
+            data.insert("high_24h".to_string(), high_24h);
+            data.insert("low_24h".to_string(), low_24h);
+            data.insert("open_24h".to_string(), open_24h);
+            data.insert("change_pct".to_string(), change_pct);
+
             Ok(data)
         }
 
@@ -410,10 +581,11 @@ mod mock {
             // Return plausible mock data so conditions can be tested locally
             data.insert("price".to_string(), 125.0);
             data.insert("volume".to_string(), 5_000_000.0);
+            data.insert("volume_24h".to_string(), 5_000_000.0);
             data.insert("high_24h".to_string(), 130.0);
             data.insert("low_24h".to_string(), 120.0);
             data.insert("open_24h".to_string(), 123.0);
-            data.insert("change_pct".to_string(), 1.6);
+            data.insert("change_pct".to_string(), 1.6260162601626016);
             Ok(data)
         }
 
@@ -451,5 +623,85 @@ pub async fn create_drift_provider(
     {
         let service = MockDriftService::new(ctx).await?;
         Ok(Box::new(service))
+    }
+}
+
+#[cfg(all(test, feature = "drift"))]
+mod drift_dlob_tests {
+    use super::real::{parse_ohlcv_from_dlob_response, DriftService};
+    use serde_json::json;
+
+    #[test]
+    fn parse_dlob_response() {
+        let now = 2_000_000;
+        let payload = json!({
+            "records": [
+                {"ts": now - 10, "price": "101000000"},
+                {"ts": now - 30, "price": "99000000"},
+                {"ts": now - 50, "price": "100500000"}
+            ]
+        });
+
+        let (high, low, open, change_pct) = parse_ohlcv_from_dlob_response(&payload, now)
+            .expect("parse should succeed");
+
+        assert!((high - 101.0).abs() < f64::EPSILON);
+        assert!((low - 99.0).abs() < f64::EPSILON);
+        assert!((open - 100.5).abs() < f64::EPSILON);
+        assert!((change_pct - 0.49751243781094534).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_dlob_empty_records() {
+        let payload = json!({ "records": [] });
+        let values = parse_ohlcv_from_dlob_response(&payload, 2_000_000)
+            .expect("empty records should be handled");
+        assert_eq!(values, (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn parse_dlob_all_old_records() {
+        let now = 2_000_000;
+        let payload = json!({
+            "records": [
+                {"ts": now - 90_000, "price": "99000000"},
+                {"ts": now - 100_000, "price": "101000000"}
+            ]
+        });
+
+        let values = parse_ohlcv_from_dlob_response(&payload, now)
+            .expect("all old records should be handled");
+        assert_eq!(values, (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[tokio::test]
+    #[ignore = "live Drift DLOB devnet/mainnet dependent test"]
+    async fn fetch_ohlcv_devnet() {
+        let (high, low, _open, change_pct) = DriftService::fetch_ohlcv_from_drift_api(0)
+            .await
+            .expect("live DLOB fetch should succeed");
+
+        assert!(high >= low);
+        assert!((-100.0..=200.0).contains(&change_pct));
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::resolve_ohlcv_with_fallback;
+    use loco_rs::prelude::Error;
+
+    #[test]
+    fn resolve_ohlcv_with_fallback_uses_fetched_values_on_success() {
+        let fetched = Ok((150.0, 120.0, 130.0, 15.384615384615385));
+        let resolved = resolve_ohlcv_with_fallback("SOL", 0, 125.0, fetched);
+        assert_eq!(resolved, (150.0, 120.0, 130.0, 15.384615384615385));
+    }
+
+    #[test]
+    fn resolve_ohlcv_with_fallback_returns_price_approximation_on_error() {
+        let fetched = Err(Error::Message("network timeout".to_string()));
+        let resolved = resolve_ohlcv_with_fallback("SOL", 0, 125.0, fetched);
+        assert_eq!(resolved, (125.0, 125.0, 125.0, 0.0));
     }
 }
