@@ -39,6 +39,8 @@ schemars = "1.0"
 rust_decimal = "1"
 mlua = { version = "0.11.6", features = ["lua54", "vendored"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+drift-rs = { git = "https://github.com/drift-labs/drift-rs", tag = "v1.0.0-alpha.16" }
+dotenvy = "0.15.7"
 
 [[bin]]
 name = "backend-cli"
