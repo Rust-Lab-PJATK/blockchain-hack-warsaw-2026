@@ -11,6 +11,9 @@ var postgresPassword = builder.AddParameter("postgres-password", "loco", secret:
 var webApiEnableDrift = builder.AddParameter("enable-drift", "false");
 var heliusApiKey = builder.AddParameter("helius-api-key", "COPY_CREDS_HERE", secret: true);
 var walletPrivateKey = builder.AddParameter("wallet-private-key", "COPY_CREDS_HERE", secret: true);
+var aiGatewayUrl = builder.AddParameter("ai-gateway-url", "COPY_CREDS_HERE");
+var aiGatewayKey = builder.AddParameter("ai-gateway-key", "COPY_CREDS_HERE", secret: true);
+var aiGatewayModel = builder.AddParameter("ai-gateway-model", "anthropic/claude-sonnet-4-6");
 
 var postgres = builder.AddPostgres("postgres")
     .WithUserName(postgresUser)
@@ -25,6 +28,9 @@ var webApi = builder.AddDockerfile("web-api", "../backend")
     .WithEnvironment("DATABASE_URL", postgresdb.Resource.UriExpression)
     .WithEnvironment("HELIUS_API_KEY", heliusApiKey)
     .WithEnvironment("WALLET_PRIVATE_KEY", walletPrivateKey)
+    .WithEnvironment("AI_GATEWAY_URL", aiGatewayUrl)
+    .WithEnvironment("AI_GATEWAY_API_KEY", aiGatewayKey)
+    .WithEnvironment("AI_GATEWAY_MODEL", aiGatewayModel)
     .WithHttpEndpoint(targetPort: 5150, port: 5150, env: "PORT", isProxied: false)
     .WithHttpHealthCheck("/")
     .WithExternalHttpEndpoints()
