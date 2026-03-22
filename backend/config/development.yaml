@@ -24,16 +24,6 @@ server:
   host: http://localhost
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
-    cors:
-      enable: true
-      allow_origins:
-        - http://localhost:3000
-      allow_methods:
-        - POST
-        - GET
-        - OPTIONS
-      allow_headers:
-        - Content-Type
 
 # Initializers Configuration
 # initializers:
@@ -62,3 +52,7 @@ database:
   dangerously_truncate: false
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_recreate: false
+
+settings:
+  helius_api_key: {{ get_env(name="HELIUS_API_KEY") }}
+  wallet_private_key: "{{ get_env(name='WALLET_PRIVATE_KEY') }}"

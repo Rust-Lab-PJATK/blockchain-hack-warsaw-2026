@@ -46,30 +46,30 @@ impl Hooks for App {
     }
 
     async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
-          let mcp_server = Arc::new(services::mcp::TradingMcpServer::new(ctx.db.clone()));
+        let mcp_server = Arc::new(services::mcp::TradingMcpServer::new(ctx.db.clone()));
 
-          let provider: Arc<dyn services::llm::LlmProvider> =
-              match services::llm::VercelProvider::new(mcp_server.clone()) {
-                  Ok(p) => {
-                      tracing::info!("Using Vercel AI Gateway provider");
-                      Arc::new(p)
-                  }
-                  Err(e) => {
-                      tracing::warn!("Vercel provider not configured ({e}), using MockProvider");
-                      Arc::new(services::llm::MockProvider)
-                  }
-              };
+        let provider: Arc<dyn services::llm::LlmProvider> =
+            match services::llm::VercelProvider::new(mcp_server.clone()) {
+                Ok(p) => {
+                    tracing::info!("Using Vercel AI Gateway provider");
+                    Arc::new(p)
+                }
+                Err(e) => {
+                    tracing::warn!("Vercel provider not configured ({e}), using MockProvider");
+                    Arc::new(services::llm::MockProvider)
+                }
+            };
 
-          let db = ctx.db.clone();
-          let mcp_service = StreamableHttpService::new(
-              move || Ok(services::mcp::TradingMcpServer::new(db.clone())),
-              LocalSessionManager::default().into(),
-              Default::default(),
-          );
+        let db = ctx.db.clone();
+        let mcp_service = StreamableHttpService::new(
+            move || Ok(services::mcp::TradingMcpServer::new(db.clone())),
+            LocalSessionManager::default().into(),
+            Default::default(),
+        );
 
-          Ok(router
-              .layer(Extension(provider))
-              .nest_service("/mcp", mcp_service))
+        Ok(router
+            .layer(Extension(provider))
+            .nest_service("/mcp", mcp_service))
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
@@ -79,7 +79,6 @@ impl Hooks for App {
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
             .add_route(controllers::strategies::routes())
-            .add_route(controllers::home::routes())
             .add_route(controllers::chat::routes())
     }
     async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {

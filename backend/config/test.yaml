@@ -50,3 +50,7 @@ database:
   dangerously_truncate: true
   # Recreating schema when application loaded.  This is a dangerous operation, make sure that you using this flag only on dev environments or test mode
   dangerously_recreate: true
+
+settings:
+  helius_api_key: {{ get_env(name="HELIUS_API_KEY") }}
+  wallet_private_key: "{{ get_env(name='WALLET_PRIVATE_KEY') }}"
