@@ -20,13 +20,22 @@ var postgresdb = postgres.AddDatabase("db");
 var webApi = builder.AddDockerfile("web-api", "../backend")
     .WithEnvironment("DATABASE_URL", postgresdb.Resource.UriExpression)
     .WithHttpEndpoint(targetPort: 5150, port: 5150, env: "PORT", isProxied: false)
+    .WithHttpHealthCheck("/")
     .WithExternalHttpEndpoints()
     .WithComputeEnvironment(compose);
 
-webApi.WaitFor(postgresdb);
+var migrations = builder.AddDockerfile("migrations", "../backend")
+    .WithEntrypoint("backend-cli")
+    .WithArgs("db", "migrate")
+    .WithEnvironment("DATABASE_URL", postgresdb.Resource.UriExpression)
+    .WithComputeEnvironment(compose);
+
+migrations.WaitFor(postgresdb);
+webApi.WaitForCompletion(migrations);
 
 var frontend = builder.AddDockerfile("frontend", "../frontend")
     .WithHttpEndpoint(targetPort: 3000, port: 3000, env: "PORT")
+    .WithHttpHealthCheck("/")
     .WithExternalHttpEndpoints()
     .WithEnvironment("HOSTNAME", "0.0.0.0")
     .WithEnvironment("WEB_API_HTTP", webApi.GetEndpoint("http"))

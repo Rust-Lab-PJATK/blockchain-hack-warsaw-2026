@@ -25,4 +25,4 @@ ENV RUST_LOG=info \
 
 EXPOSE 5150
 
-CMD ["backend-cli", "start"]
+CMD ["backend-cli", "start", "-b", "0.0.0.0"]
