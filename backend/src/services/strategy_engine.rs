@@ -1,5 +1,5 @@
 use std::sync::Arc;
-
+use crate::controllers::notification::ClientMap;
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryFilter, ColumnTrait, Set, Condition};
 
@@ -55,12 +55,14 @@ fn side_to_position_side(side: &crate::models::_entities::sea_orm_active_enums::
 }
 
 /// Starts the strategy engine background loop.
-pub fn start(db: DatabaseConnection, drift: Arc<dyn DriftProvider>) {
+// FIX 1: client_id must be String (owned), not str (unsized) — str alone can never be a function parameter
+pub fn start(db: DatabaseConnection, drift: Arc<dyn DriftProvider>, clients: ClientMap, client_id: String) {
     tokio::spawn(async move {
         tracing::info!("Strategy engine started (interval={ENGINE_INTERVAL_SECS}s)");
         let evaluator = LuaEvaluator;
         loop {
-            if let Err(e) = tick(&db, &drift, &evaluator).await {
+            // FIX 2: pass clients and client_id down to tick
+            if let Err(e) = tick(&db, &drift, &evaluator, &clients, &client_id).await {
                 tracing::error!("Strategy engine tick error: {e}");
             }
             tokio::time::sleep(std::time::Duration::from_secs(ENGINE_INTERVAL_SECS)).await;
@@ -72,10 +74,13 @@ async fn tick(
     db: &DatabaseConnection,
     drift: &Arc<dyn DriftProvider>,
     evaluator: &LuaEvaluator,
+    clients: &ClientMap,
+    client_id: &str,
 ) -> Result<()> {
-    check_approved_strategies(db, drift, evaluator).await?;
-    check_queued_strategies(db, drift).await?;
-    check_stop_losses(db, drift).await?;
+    // FIX 3: pass clients and client_id into all three check functions
+    check_approved_strategies(db, drift, evaluator, clients, client_id).await?;
+    check_queued_strategies(db, drift, clients, client_id).await?;
+    check_stop_losses(db, drift, clients, client_id).await?;
     Ok(())
 }
 
@@ -105,7 +110,13 @@ async fn fetch_market_data_with_retry(
 
 // ── Save notification to chat_messages ─────────────────────────────────────
 
-async fn save_notification(db: &DatabaseConnection, message: &str) {
+async fn save_notification(
+    db: &DatabaseConnection,
+    message: &str,
+    clients: &ClientMap,
+    client_id: &str,
+) {
+    // 1. Persist to DB
     let record = chat_message::ActiveModel {
         user_message: Set(String::new()),
         assistant_message: Set(message.to_owned()),
@@ -115,6 +126,19 @@ async fn save_notification(db: &DatabaseConnection, message: &str) {
     if let Err(e) = record.insert(db).await {
         tracing::error!("Failed to save notification: {e}");
     }
+
+    // 2. Push to SSE client if connected
+    publish_sse(clients, client_id, message).await;
+}
+
+async fn publish_sse(clients: &ClientMap, client_id: &str, message: &str) {
+    let map = clients.lock().await;
+    if let Some(tx) = map.get(client_id) {
+        let payload = serde_json::json!({ "message": message }).to_string();
+        if tx.send(payload).await.is_err() {
+            tracing::warn!("Client {client_id} disconnected, notification saved to DB only");
+        }
+    }
 }
 
 // ── Phase 1: Check approved strategies ─────────────────────────────────────
@@ -123,6 +147,8 @@ async fn check_approved_strategies(
     db: &DatabaseConnection,
     drift: &Arc<dyn DriftProvider>,
     evaluator: &LuaEvaluator,
+    clients: &ClientMap,
+    client_id: &str,
 ) -> Result<()> {
     let strategies = strategy::Entity::find()
         .filter(strategy::Column::Status.eq(StrategyStatus::Approved))
@@ -131,7 +157,7 @@ async fn check_approved_strategies(
         .map_err(Error::wrap)?;
 
     for strat in strategies {
-        if let Err(e) = process_approved_strategy(db, drift, evaluator, &strat).await {
+        if let Err(e) = process_approved_strategy(db, drift, evaluator, &strat, clients, client_id).await {
             tracing::error!("Error processing strategy #{}: {e}", strat.id);
             let mut active: strategy::ActiveModel = strat.into();
             active.status = Set(StrategyStatus::Failed);
@@ -147,6 +173,8 @@ async fn process_approved_strategy(
     drift: &Arc<dyn DriftProvider>,
     evaluator: &LuaEvaluator,
     strat: &strategy::Model,
+    clients: &ClientMap,
+    client_id: &str,
 ) -> Result<()> {
     // 1. Check scheduled_at — skip if time hasn't arrived yet
     if let Some(scheduled_at) = strat.scheduled_at {
@@ -170,6 +198,8 @@ async fn process_approved_strategy(
                     "Strategy #{} ({}): market data feed unavailable, skipping this tick.",
                     strat.id, strat.symbol
                 ),
+                clients,
+                client_id,
             ).await;
             return Ok(()); // Don't fail the strategy, try again next tick
         }
@@ -208,6 +238,8 @@ async fn process_approved_strategy(
                 "Strategy #{} ({}): insufficient funds. Available: ${balance:.2}, required: ~${required:.2}. Trade not executed.",
                 strat.id, strat.symbol
             ),
+            clients,
+            client_id,
         ).await;
         return Ok(()); // Don't fail — user might deposit funds
     }
@@ -240,6 +272,8 @@ async fn process_approved_strategy(
                     "Executed trade for strategy #{}: {:?} {} {} at price ${current_price:.2}, because condition \"{}\" was met. Tx: {sig}",
                     strat.id, strat.side, quantity_f64, strat.symbol, strat.condition
                 ),
+                clients,
+                client_id,
             ).await;
         }
         Err(e) => {
@@ -260,6 +294,8 @@ async fn process_approved_strategy(
                     "Strategy #{} ({}): trade execution failed ({}). Queued for automatic retry.",
                     strat.id, strat.symbol, e
                 ),
+                clients,
+                client_id,
             ).await;
         }
     }
@@ -272,6 +308,8 @@ async fn process_approved_strategy(
 async fn check_queued_strategies(
     db: &DatabaseConnection,
     drift: &Arc<dyn DriftProvider>,
+    clients: &ClientMap,
+    client_id: &str,
 ) -> Result<()> {
     let strategies = strategy::Entity::find()
         .filter(strategy::Column::Status.eq(StrategyStatus::Queued))
@@ -300,6 +338,8 @@ async fn check_queued_strategies(
                         "Strategy #{} ({}): trade cancelled — queued for over 1 hour without successful execution.",
                         strat.id, strat.symbol
                     ),
+                    clients,
+                    client_id,
                 ).await;
                 continue;
             }
@@ -333,6 +373,8 @@ async fn check_queued_strategies(
                         "Strategy #{} ({}): queued trade successfully executed. Tx: {sig}",
                         strat.id, strat.symbol
                     ),
+                    clients,
+                    client_id,
                 ).await;
             }
             Err(e) => {
@@ -353,6 +395,8 @@ async fn check_queued_strategies(
 async fn check_stop_losses(
     db: &DatabaseConnection,
     drift: &Arc<dyn DriftProvider>,
+    clients: &ClientMap,
+    client_id: &str,
 ) -> Result<()> {
     let strategies = strategy::Entity::find()
         .filter(strategy::Column::Status.eq(StrategyStatus::Triggered))
@@ -392,7 +436,7 @@ async fn check_stop_losses(
                             execute_stop_loss(db, drift, perp_market, &strat, &format!(
                                 "Closed position for strategy #{} ({}): price ${current_price:.2} hit stop-loss at ${sl_price_f64:.2}.",
                                 strat.id, strat.symbol
-                            )).await;
+                            ), clients, client_id).await;
                             continue;
                         }
                     }
@@ -417,7 +461,7 @@ async fn check_stop_losses(
                             execute_stop_loss(db, drift, perp_market, &strat, &format!(
                                 "Closed position for strategy #{} ({}): PnL {pnl_pct:.2}% exceeded stop-loss threshold of -{sl_pct_f64:.2}%.",
                                 strat.id, strat.symbol
-                            )).await;
+                            ), clients, client_id).await;
                         }
                     }
                     Ok(None) => {
@@ -443,6 +487,8 @@ async fn execute_stop_loss(
     market: PerpMarket,
     strat: &strategy::Model,
     notification_msg: &str,
+    clients: &ClientMap,
+    client_id: &str,
 ) {
     match drift.close_perp_position(market).await {
         Ok(sig) => {
@@ -451,7 +497,7 @@ async fn execute_stop_loss(
             active.status = Set(StrategyStatus::Stopped);
             let _ = active.update(db).await;
 
-            save_notification(db, &format!("{notification_msg} Tx: {sig}")).await;
+            save_notification(db, &format!("{notification_msg} Tx: {sig}"), clients, client_id).await;
         }
         Err(e) => {
             tracing::error!("Failed to close position for strategy #{}: {e}", strat.id);
