@@ -10,10 +10,62 @@ const SUB_ACCOUNT_ID: u16 = 0;
 
 pub type SignatureText = String;
 
-#[derive(Clone, Copy, Debug)]
+#[repr(u16)]
+#[derive(Debug, Clone, Copy)]
+pub enum PerpMarket {
+    SOL = 0,
+    BTC,
+    ETH,
+    APT,
+    BONK,
+    POL,
+    ARB,
+    DOGE,
+    BNB,
+    SUI,
+    PEPE,
+    OP,
+    RENDER,
+    XRP,
+    HNT,
+    INJ,
+    LINK,
+    RLB,
+    PYTH,
+    TIA,
+    JTO,
+    SEI,
+    AVAX,
+    W,
+    KMNO,
+    WEN,
+    TrumpWin2024,
+    KamalaPopularVote2024,
+    Random2024,
+    NVDA,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum PositionSide {
     Long,
     Short,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PerpAmount {
+    // Amount in Drift SDK native units - in perpetual orders it's ACTUAL BUY AMOUNT * 1 000 000 000
+    NativeUnits(u64),
+    // Actual amount you will see in Drift order book
+    ActualUnits(f64),
+}
+
+impl PerpAmount {
+    pub fn to_native_units(&self) -> u64 {
+        match self {
+            Self::ActualUnits(a) => (a * 1_000_000_000.) as u64,
+            Self::NativeUnits(a) => *a,
+        }
+    }
 }
 
 pub struct DriftService {
@@ -59,19 +111,11 @@ impl DriftService {
 
     pub async fn open_perp_position(
         &self,
-        market_index: u16,
+        market: PerpMarket,
         side: PositionSide,
-        base_asset_amount: u64,
+        amount: PerpAmount,
     ) -> Result<SignatureText> {
-        if base_asset_amount == 0 {
-            return Err(Error::BadRequest(
-                "base_asset_amount must be > 0".to_string(),
-            ));
-        }
-
-        let base_asset_amount = self
-            .normalize_open_amount(market_index, base_asset_amount)
-            .await?;
+        let normalized_amount = self.normalize_open_amount(market as u16, amount).await?;
 
         self.initialize_user_pda().await.ok();
         let sub_account = self.client.wallet().sub_account(SUB_ACCOUNT_ID);
@@ -81,14 +125,14 @@ impl DriftService {
             .await
             .map_err(Error::wrap)?;
 
-        let signed_amount = i64::try_from(base_asset_amount)
+        let signed_amount = i64::try_from(normalized_amount)
             .map_err(|_| Error::BadRequest("base_asset_amount too large".to_string()))?;
         let signed_amount = match side {
             PositionSide::Long => signed_amount,
             PositionSide::Short => -signed_amount,
         };
 
-        let order = drift_rs::types::NewOrder::market(MarketId::perp(market_index))
+        let order = drift_rs::types::NewOrder::market(MarketId::perp(market as u16))
             .amount(signed_amount)
             .build();
 
@@ -105,7 +149,7 @@ impl DriftService {
         Ok(sig.to_string())
     }
 
-    pub async fn close_perp_position(&self, market_index: u16) -> Result<SignatureText> {
+    pub async fn close_perp_position(&self, market: PerpMarket) -> Result<SignatureText> {
         self.initialize_user_pda().await.ok();
         let sub_account = self.client.wallet().sub_account(SUB_ACCOUNT_ID);
         let user = self
@@ -116,12 +160,10 @@ impl DriftService {
 
         let position = self
             .client
-            .perp_position(&sub_account, market_index)
+            .perp_position(&sub_account, market as u16)
             .await
             .map_err(Error::wrap)?
-            .ok_or_else(|| {
-                Error::BadRequest(format!("no perp position for market {market_index}"))
-            })?;
+            .ok_or_else(|| Error::BadRequest(format!("no perp position for market {market:?}")))?;
 
         if position.base_asset_amount == 0 {
             return Err(Error::BadRequest("position is already flat".to_string()));
@@ -136,7 +178,7 @@ impl DriftService {
                 .map_err(|_| Error::BadRequest("position size too large".to_string()))?
         };
 
-        let close_order = drift_rs::types::NewOrder::market(MarketId::perp(market_index))
+        let close_order = drift_rs::types::NewOrder::market(MarketId::perp(market as u16))
             .amount(signed_close_amount)
             .reduce_only(true)
             .build();
@@ -153,7 +195,9 @@ impl DriftService {
         Ok(sig.to_string())
     }
 
-    async fn normalize_open_amount(&self, market_index: u16, requested_amount: u64) -> Result<u64> {
+    async fn normalize_open_amount(&self, market_index: u16, amount: PerpAmount) -> Result<u64> {
+        let mut native_amount = amount.to_native_units();
+
         let market = self
             .client
             .get_perp_market_account(market_index)
@@ -161,15 +205,19 @@ impl DriftService {
             .map_err(Error::wrap)?;
 
         let min = market.amm.min_order_size;
-        let step = market.amm.order_step_size.max(1);
-
-        let mut normalized = requested_amount.max(min);
-        let rem = normalized % step;
-        if rem != 0 {
-            normalized = normalized.saturating_add(step - rem);
+        if native_amount < min {
+            return Err(Error::BadRequest(format!(
+                "requested amount is lower than min_order_size, {native_amount} < {min}"
+            )));
         }
 
-        Ok(normalized)
+        let step = market.amm.order_step_size.max(1);
+        let rem = native_amount % step;
+        if rem != 0 {
+            native_amount = native_amount.saturating_add(step - rem);
+        }
+
+        Ok(native_amount)
     }
 }
 
