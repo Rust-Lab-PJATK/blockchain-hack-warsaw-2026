@@ -5,6 +5,7 @@
   use loco_rs::prelude::*;
 
   impl Model {
+      #[allow(clippy::too_many_arguments)]
       pub async fn create(
           db: &DatabaseConnection,
           symbol: &str,
@@ -15,6 +16,8 @@
           quantity: Decimal,
           condition: &str,
           stop_loss_pct: Option<Decimal>,
+          stop_loss_price: Option<Decimal>,
+          scheduled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
       ) -> ModelResult<Self> {
           let symbol_exists = symbol::Entity::find()
               .filter(symbol::Column::Name.eq(symbol))
@@ -35,6 +38,8 @@
               quantity: Set(quantity),
               condition: Set(condition.to_owned()),
               stop_loss_pct: Set(stop_loss_pct),
+              stop_loss_price: Set(stop_loss_price),
+              scheduled_at: Set(scheduled_at.map(|dt| dt.into())),
               status: Set(StrategyStatus::Waiting),
               ..Default::default()
           };

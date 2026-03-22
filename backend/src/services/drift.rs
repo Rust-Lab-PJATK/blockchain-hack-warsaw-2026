@@ -88,6 +88,10 @@ pub trait DriftProvider: Send + Sync {
     /// Get the unrealized PnL percentage for an open position on a given market.
     /// Returns None if no position is open.
     async fn get_position_pnl(&self, market: PerpMarket) -> Result<Option<f64>>;
+    /// Get the current price for a specific perp market (for absolute stop-loss checks).
+    async fn get_current_price(&self, market: PerpMarket) -> Result<f64>;
+    /// Get the user's available balance (free collateral) in USD.
+    async fn get_user_balance(&self) -> Result<f64>;
 }
 
 // ── Real implementation (requires drift feature + Solana RPC) ──────────────
@@ -269,6 +273,30 @@ mod real {
                 _ => Ok(None),
             }
         }
+
+        async fn get_current_price(&self, market: PerpMarket) -> Result<f64> {
+            let market_account = self
+                .client
+                .get_perp_market_account(market as u16)
+                .await
+                .map_err(Error::wrap)?;
+            // Oracle price is stored as fixed-point with PRICE_PRECISION (1e6)
+            let price = market_account.amm.historical_oracle_data.last_oracle_price as f64 / 1_000_000.0;
+            Ok(price)
+        }
+
+        async fn get_user_balance(&self) -> Result<f64> {
+            let sub_account = self.client.wallet().sub_account(SUB_ACCOUNT_ID);
+            let user = self
+                .client
+                .get_user_account(&sub_account)
+                .await
+                .map_err(Error::wrap)?;
+            // total_collateral is in QUOTE_PRECISION (1e6)
+            // Use settled_perp_pnl + total deposits as approximation
+            let balance = user.total_deposits as f64 / 1_000_000.0;
+            Ok(balance)
+        }
     }
 
     impl DriftService {
@@ -393,6 +421,16 @@ mod mock {
             tracing::info!("[mock] get_position_pnl: market={market:?}");
             // Mock: return a small positive PnL
             Ok(Some(2.5))
+        }
+
+        async fn get_current_price(&self, market: PerpMarket) -> Result<f64> {
+            tracing::info!("[mock] get_current_price: market={market:?}");
+            Ok(125.0)
+        }
+
+        async fn get_user_balance(&self) -> Result<f64> {
+            tracing::info!("[mock] get_user_balance");
+            Ok(10_000.0)
         }
     }
 }

@@ -18,6 +18,8 @@ pub struct CreateStrategyParams {
     #[serde(default)]
     pub condition: String,
     pub stop_loss_pct: Option<Decimal>,
+    pub stop_loss_price: Option<Decimal>,
+    pub scheduled_at: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 async fn create(
@@ -34,6 +36,8 @@ async fn create(
         params.quantity,
         &params.condition,
         params.stop_loss_pct,
+        params.stop_loss_price,
+        params.scheduled_at,
     )
     .await
     {

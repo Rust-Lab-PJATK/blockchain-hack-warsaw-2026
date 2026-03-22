@@ -21,7 +21,10 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub condition: String,
     pub stop_loss_pct: Option<Decimal>,
+    pub stop_loss_price: Option<Decimal>,
+    pub scheduled_at: Option<DateTimeWithTimeZone>,
     pub executed_at: Option<DateTimeWithTimeZone>,
+    pub queued_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

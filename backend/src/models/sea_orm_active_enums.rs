@@ -72,9 +72,10 @@ impl<'de> Deserialize<'de> for StrategyStatus {
             "triggered" => Ok(StrategyStatus::Triggered),
             "stopped" => Ok(StrategyStatus::Stopped),
             "failed" => Ok(StrategyStatus::Failed),
+            "queued" => Ok(StrategyStatus::Queued),
             other => Err(serde::de::Error::unknown_variant(
                 other,
-                &["waiting", "approved", "triggered", "stopped", "failed"],
+                &["waiting", "approved", "triggered", "stopped", "failed", "queued"],
             )),
         }
     }
@@ -88,7 +89,7 @@ impl schemars::JsonSchema for StrategyStatus {
     fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "type": "string",
-            "enum": ["waiting", "approved", "triggered", "stopped", "failed"]
+            "enum": ["waiting", "approved", "triggered", "stopped", "failed", "queued"]
         })
     }
 }

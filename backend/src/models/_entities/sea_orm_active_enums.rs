@@ -38,4 +38,6 @@ pub enum StrategyStatus {
     Stopped,
     #[sea_orm(string_value = "failed")]
     Failed,
+    #[sea_orm(string_value = "queued")]
+    Queued,
 }

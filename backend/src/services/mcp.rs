@@ -44,6 +44,12 @@ pub struct CreateTradeArgs {
 
     #[schemars(description = "Optional stop-loss percentage (positive number). If the position PnL drops below -X%, it will be automatically closed. Example: 5.0 means close at -5%")]
     pub stop_loss_pct: Option<f64>,
+
+    #[schemars(description = "Optional absolute stop-loss price. For long positions: if price drops below this value, close. For short: if price rises above this value, close. Example: 120.0")]
+    pub stop_loss_price: Option<f64>,
+
+    #[schemars(description = "Optional scheduled execution time in ISO 8601 format. The strategy will only execute after this time. Example: 2026-03-22T18:00:00Z")]
+    pub scheduled_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,11 +111,27 @@ impl TradingMcpServer {
         &self,
         Parameters(args): Parameters<CreateTradeArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let stop_loss = args
+        let stop_loss_pct = args
             .stop_loss_pct
             .map(rust_decimal::Decimal::try_from)
             .transpose()
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let stop_loss_price = args
+            .stop_loss_price
+            .map(rust_decimal::Decimal::try_from)
+            .transpose()
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+
+        let scheduled_at = args
+            .scheduled_at
+            .as_deref()
+            .map(|s| {
+                chrono::DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.with_timezone(&chrono::Utc).into())
+                    .map_err(|e| McpError::invalid_params(format!("invalid scheduled_at: {e}"), None))
+            })
+            .transpose()?;
 
         let record = strategy::ActiveModel {
             symbol: Set(args.symbol.clone()),
@@ -121,7 +143,9 @@ impl TradingMcpServer {
             price: Set(rust_decimal::Decimal::try_from(args.price)
                 .map_err(|e| McpError::invalid_params(e.to_string(), None))?),
             condition: Set(args.condition.clone()),
-            stop_loss_pct: Set(stop_loss),
+            stop_loss_pct: Set(stop_loss_pct),
+            stop_loss_price: Set(stop_loss_price),
+            scheduled_at: Set(scheduled_at),
             status: Set(StrategyStatus::Waiting),
             ..Default::default()
         };
@@ -131,8 +155,8 @@ impl TradingMcpServer {
         })?;
 
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Strategy #{} created (status: waiting — user must approve before execution): {:?} {} {} @ {} x{} (type: {:?}, condition: \"{}\", stop_loss: {:?})",
-            result.id, args.side, args.quantity, args.symbol, args.price, args.leverage, args.order_type, args.condition, args.stop_loss_pct
+            "Strategy #{} created (status: waiting — user must approve before execution): {:?} {} {} @ {} x{} (type: {:?}, condition: \"{}\", stop_loss_pct: {:?}, stop_loss_price: {:?}, scheduled_at: {:?})",
+            result.id, args.side, args.quantity, args.symbol, args.price, args.leverage, args.order_type, args.condition, args.stop_loss_pct, args.stop_loss_price, args.scheduled_at
         ))]))
     }
 }
